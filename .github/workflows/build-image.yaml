@@ -85,14 +85,6 @@ jobs:
         with:
           submodules: 'recursive'
 
-      # Setup Python 3
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3'
-
-      - uses: pre-commit/action@v3.0.1
-
       - name: Docker meta
         if: matrix.variant == 'default'
         id: meta_default
