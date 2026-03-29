@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+    <name>mbf_costmap_core</name>
+    <version>0.4.0</version>
+    <description>
+        This package provides common interfaces for costmap-based navigation plugins.
+        It contains the CostmapPlanner, CostmapController and CostmapRecovery interfaces.
+        Ported from ROS1 move_base_flex to ROS2 Jazzy with nav2_costmap_2d.
+    </description>
+    <maintainer email="spuetz@uos.de">Sebastian Puetz</maintainer>
+    <maintainer email="santos@magazino.eu">Jorge Santos</maintainer>
+    <license>BSD-3-Clause</license>
+
+    <buildtool_depend>ament_cmake</buildtool_depend>
+
+    <depend>geometry_msgs</depend>
+    <depend>mbf_abstract_core</depend>
+    <depend>mbf_utility</depend>
+    <depend>nav2_costmap_2d</depend>
+    <depend>rclcpp</depend>
+    <depend>std_msgs</depend>
+    <depend>tf2_ros</depend>
+
+    <export>
+        <build_type>ament_cmake</build_type>
+    </export>
+</package>
