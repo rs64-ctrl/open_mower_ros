@@ -1,66 +1,62 @@
-cmake_minimum_required(VERSION 3.0.2)
+cmake_minimum_required(VERSION 3.8)
 project(xbot_positioning)
 
+if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  add_compile_options(-Wall -Wextra -Wpedantic)
+endif()
 
-find_package(catkin REQUIRED COMPONENTS
-        geometry_msgs
-        xbot_msgs
-        roscpp
-        tf2_geometry_msgs
-        tf2
-        tf2_ros
-        message_generation
-        geometry_msgs
-        )
+find_package(ament_cmake REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(std_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(tf2 REQUIRED)
+find_package(tf2_ros REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED)
+find_package(xbot_msgs REQUIRED)
+find_package(rosidl_default_generators REQUIRED)
+find_package(Boost)
 
-
-find_package(
-        Boost
+rosidl_generate_interfaces(${PROJECT_NAME}
+  "msg/KalmanState.msg"
+  "srv/GPSControlSrv.srv"
+  "srv/SetPoseSrv.srv"
+  DEPENDENCIES std_msgs geometry_msgs
 )
 
-
-
-
-add_message_files(
-        FILES
-        KalmanState.msg
+add_executable(xbot_positioning_node
+  src/xbot_positioning_core.h
+  src/xbot_positioning_core.cpp
+  src/xbot_positioning.cpp
+  src/OrientationMeasurementModel.hpp
+  src/OrientationMeasurementModel2.hpp
+  src/PositionMeasurementModel.hpp
+  src/SystemModel.hpp
 )
 
-add_service_files(
-        FILES
-        GPSControlSrv.srv
-        SetPoseSrv.srv
+target_include_directories(xbot_positioning_node PRIVATE
+  include
 )
 
-generate_messages(
-        DEPENDENCIES
-        std_msgs
-        geometry_msgs
-)
-catkin_package(
-        #          INCLUDE_DIRS include
-        #  LIBRARIES mower_comms
-        #  CATKIN_DEPENDS mower_msgs roscpp serial
-        #  DEPENDS system_lib
-)
-
-###########
-## Build ##
-###########
-
-include_directories(
-        include
-        ${catkin_INCLUDE_DIRS}
+ament_target_dependencies(xbot_positioning_node
+  rclcpp
+  std_msgs
+  geometry_msgs
+  nav_msgs
+  sensor_msgs
+  tf2
+  tf2_ros
+  tf2_geometry_msgs
+  xbot_msgs
 )
 
-add_executable(xbot_positioning
-        src/xbot_positioning_core.h
-        src/xbot_positioning_core.cpp
-        src/xbot_positioning.cpp
-        src/OrientationMeasurementModel.hpp
-        src/OrientationMeasurementModel2.hpp
-        src/PositionMeasurementModel.hpp
-        src/SystemModel.hpp)
+rosidl_get_typesupport_target(cpp_typesupport_target ${PROJECT_NAME} rosidl_typesupport_cpp)
+target_link_libraries(xbot_positioning_node "${cpp_typesupport_target}")
 
-add_dependencies(xbot_positioning ${catkin_EXPORTED_TARGETS} ${${PROJECT_NAME}_EXPORTED_TARGETS})
-target_link_libraries(xbot_positioning ${catkin_LIBRARIES})
+install(TARGETS
+  xbot_positioning_node
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+ament_package()

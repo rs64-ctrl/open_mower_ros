@@ -7,7 +7,7 @@ uint8   WHEEL_VALID_FR=2
 uint8   WHEEL_VALID_RL=4
 uint8   WHEEL_VALID_RR=8
 
-time stamp
+builtin_interfaces/Time stamp
 uint32 wheel_tick_factor    # factor to use to convert wheel ticks to m
 uint8  valid_wheels         # Bitfield to show which ticks are valid
 uint8 wheel_direction_fl    # wheel direction front left

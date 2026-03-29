@@ -15,18 +15,17 @@
 #ifndef SRC_UNDOCKINGBEHAVIOR_H
 #define SRC_UNDOCKINGBEHAVIOR_H
 
-#include <actionlib/client/simple_action_client.h>
-#include <mbf_msgs/ExePathAction.h>
+#include <rclcpp_action/rclcpp_action.hpp>
+#include <mbf_msgs/action/exe_path.hpp>
 #include <tf2/LinearMath/Transform.h>
 
 #include "Behavior.h"
 #include "DockingBehavior.h"
 #include "IdleBehavior.h"
 #include "MowingBehavior.h"
-#include "ros/ros.h"
-#include "tf2_geometry_msgs/tf2_geometry_msgs.h"
-#include "xbot_msgs/AbsolutePose.h"
-#include "xbot_msgs/ActionInfo.h"
+#include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
+#include "xbot_msgs/msg/absolute_pose.hpp"
+#include "xbot_msgs/msg/action_info.hpp"
 
 class UndockingBehavior : public Behavior {
  public:
@@ -36,10 +35,10 @@ class UndockingBehavior : public Behavior {
   UndockingBehavior(Behavior* nextBehavior);
 
  private:
-  std::vector<xbot_msgs::ActionInfo> actions;
+  std::vector<xbot_msgs::msg::ActionInfo> actions;
 
   Behavior* nextBehavior;
-  geometry_msgs::PoseStamped docking_pose_stamped;
+  geometry_msgs::msg::PoseStamped docking_pose_stamped;
   bool gpsRequired;
 
   bool waitForGPS();

@@ -1,41 +1,71 @@
-#include <ros/ros.h>
+#include <rclcpp/rclcpp.hpp>
 
-#include "std_msgs/Float32.h"
-#include <xesc_msgs/XescStateStamped.h>
+#include <std_msgs/msg/float32.hpp>
+#include <xesc_msgs/msg/xesc_state_stamped.hpp>
 #include "xesc_driver/xesc_driver.h"
 
-xesc_driver::XescDriver* xesc_driver_ptr = nullptr;
+class XescDriverNode : public rclcpp::Node
+{
+public:
+    XescDriverNode()
+        : Node("xesc_driver_node")
+    {
+    }
 
-void velReceived(const std_msgs::Float32::ConstPtr &msg) {
-    if(!xesc_driver_ptr)
-        return;
+    void init()
+    {
+        xesc_driver_ptr_ = std::make_unique<xesc_driver::XescDriver>(shared_from_this());
 
-    xesc_driver_ptr->setDutyCycle(msg->data);
-}
+        state_pub_ = this->create_publisher<xesc_msgs::msg::XescStateStamped>("sensors/core", 10);
+
+        duty_cycle_sub_ = this->create_subscription<std_msgs::msg::Float32>(
+            "~/duty_cycle", rclcpp::QoS(0).best_effort(),
+            std::bind(&XescDriverNode::velReceived, this, std::placeholders::_1));
+    }
+
+    void run()
+    {
+        xesc_msgs::msg::XescStateStamped state_msg;
+        while (rclcpp::ok()) {
+            xesc_driver_ptr_->getStatusBlocking(state_msg);
+            state_pub_->publish(state_msg);
+        }
+        RCLCPP_INFO_STREAM(this->get_logger(), "stopping XESC driver node");
+        xesc_driver_ptr_->stop();
+    }
+
+private:
+    void velReceived(const std_msgs::msg::Float32::SharedPtr msg)
+    {
+        if (!xesc_driver_ptr_)
+            return;
+        xesc_driver_ptr_->setDutyCycle(msg->data);
+    }
+
+    std::unique_ptr<xesc_driver::XescDriver> xesc_driver_ptr_;
+    rclcpp::Publisher<xesc_msgs::msg::XescStateStamped>::SharedPtr state_pub_;
+    rclcpp::Subscription<std_msgs::msg::Float32>::SharedPtr duty_cycle_sub_;
+};
 
 int main(int argc, char **argv) {
-    ros::init(argc, argv, "xesc_2040_driver_node");
-    ros::NodeHandle nh;
-    ros::NodeHandle private_nh("~");
-    ros::Subscriber duty_cycle_sub = private_nh.subscribe("duty_cycle", 0, velReceived, ros::TransportHints().tcpNoDelay(true));
+    rclcpp::init(argc, argv);
 
-    // create xesc state (telemetry) publisher
-    ros::Publisher state_pub = nh.advertise<xesc_msgs::XescStateStamped>("sensors/core", 10);
+    auto node = std::make_shared<XescDriverNode>();
+    node->init();
 
-    xesc_driver_ptr = new xesc_driver::XescDriver(nh,private_nh);
+    // Use a multi-threaded executor so callbacks fire while run() blocks
+    rclcpp::executors::MultiThreadedExecutor executor;
+    executor.add_node(node);
 
-    ros::AsyncSpinner spinner(1);
-    spinner.start();
-    xesc_msgs::XescStateStamped state_msg;
-    while (ros::ok()) {
-        xesc_driver_ptr->getStatusBlocking(state_msg);
-        state_pub.publish(state_msg);
-    }
-    ROS_INFO_STREAM("stopping XESC driver node");
-    xesc_driver_ptr->stop();
-    spinner.stop();
+    // Spin in a background thread
+    auto spin_thread = std::thread([&executor]() {
+        executor.spin();
+    });
 
-    delete xesc_driver_ptr;
+    node->run();
+
+    rclcpp::shutdown();
+    spin_thread.join();
 
     return 0;
 }

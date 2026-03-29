@@ -14,8 +14,8 @@
 //
 #include "IdleBehavior.h"
 
-#include <mower_logic/PowerConfig.h>
-#include <mower_msgs/Power.h>
+#include "mower_logic/PowerConfig.h"
+#include <mower_msgs/msg/power.hpp>
 
 #include "PerimeterDocking.h"
 
@@ -23,20 +23,18 @@ extern void stopMoving();
 extern void stopBlade();
 extern void setEmergencyMode(bool emergency);
 extern void setGPS(bool enabled);
-extern void setRobotPose(geometry_msgs::Pose& pose);
-extern void registerActions(std::string prefix, const std::vector<xbot_msgs::ActionInfo>& actions);
-extern ros::Time rain_resume;
+extern void setRobotPose(geometry_msgs::msg::Pose& pose);
+extern void registerActions(std::string prefix, const std::vector<xbot_msgs::msg::ActionInfo>& actions);
+extern rclcpp::Time rain_resume;
 
-extern ros::ServiceClient dockingPointClient;
-extern mower_msgs::Status getStatus();
-extern mower_msgs::Power getPower();
+extern rclcpp::Client<mower_map::srv::GetDockingPointSrv>::SharedPtr dockingPointClient;
+extern mower_msgs::msg::Status getStatus();
+extern mower_msgs::msg::Power getPower();
 extern mower_logic::MowerLogicConfig getConfig();
 extern void setConfig(mower_logic::MowerLogicConfig);
 extern ll::PowerConfig getPowerConfig();
-extern dynamic_reconfigure::Server<mower_logic::MowerLogicConfig>* reconfigServer;
 
-extern ros::ServiceClient mapClient;
-extern ros::ServiceClient dockingPointClient;
+extern rclcpp::Client<mower_map::srv::GetMowingAreaSrv>::SharedPtr mapClient;
 
 IdleBehavior IdleBehavior::INSTANCE(false);
 IdleBehavior IdleBehavior::DOCKED_INSTANCE(true);
@@ -47,28 +45,34 @@ std::string IdleBehavior::state_name() {
 
 Behavior* IdleBehavior::execute() {
   // Check, if we have a configured map. If not, print info and go to area recorder
-  mower_map::GetMowingAreaSrv mapSrv;
-  mapSrv.request.index = 0;
-  if (!mapClient.call(mapSrv)) {
-    ROS_WARN("We don't have a map configured. Starting Area Recorder!");
+  auto mapReq = std::make_shared<mower_map::srv::GetMowingAreaSrv::Request>();
+  mapReq->index = 0;
+  auto mapResult = mapClient->async_send_request(mapReq);
+  if (rclcpp::spin_until_future_complete(rosNode, mapResult, std::chrono::seconds(5)) !=
+      rclcpp::FutureReturnCode::SUCCESS) {
+    RCLCPP_WARN(rosNode->get_logger(), "We don't have a map configured. Starting Area Recorder!");
     return &AreaRecordingBehavior::INSTANCE;
   }
 
   // Check, if we have a docking position. If not, print info and go to area recorder
-  mower_map::GetDockingPointSrv get_docking_point_srv;
-  if (!dockingPointClient.call(get_docking_point_srv)) {
-    ROS_WARN("We don't have a docking point configured. Starting Area Recorder!");
+  auto dockReq = std::make_shared<mower_map::srv::GetDockingPointSrv::Request>();
+  auto dockResult = dockingPointClient->async_send_request(dockReq);
+  if (rclcpp::spin_until_future_complete(rosNode, dockResult, std::chrono::seconds(5)) !=
+      rclcpp::FutureReturnCode::SUCCESS) {
+    RCLCPP_WARN(rosNode->get_logger(), "We don't have a docking point configured. Starting Area Recorder!");
     return &AreaRecordingBehavior::INSTANCE;
   }
 
-  setGPS(false);
-  geometry_msgs::PoseStamped docking_pose_stamped;
-  docking_pose_stamped.pose = get_docking_point_srv.response.docking_pose;
-  docking_pose_stamped.header.frame_id = "map";
-  docking_pose_stamped.header.stamp = ros::Time::now();
+  auto dockResp = dockResult.get();
 
-  ros::Rate r(25);
-  while (ros::ok()) {
+  setGPS(false);
+  geometry_msgs::msg::PoseStamped docking_pose_stamped;
+  docking_pose_stamped.pose = dockResp->docking_pose;
+  docking_pose_stamped.header.frame_id = "map";
+  docking_pose_stamped.header.stamp = rosNode->get_clock()->now();
+
+  rclcpp::Rate r(25);
+  while (rclcpp::ok()) {
     stopMoving();
     stopBlade();
     const auto last_config = getConfig();
@@ -79,9 +83,14 @@ Behavior* IdleBehavior::execute() {
     const bool automatic_mode = last_config.automatic_mode == eAutoMode::AUTO;
     const bool active_semiautomatic_task =
         last_config.automatic_mode == eAutoMode::SEMIAUTO && shared_state->active_semiautomatic_task;
-    const bool rain_delay = last_config.rain_mode == 2 && ros::Time::now() < rain_resume;
+    const bool rain_delay = last_config.rain_mode == 2 && rosNode->get_clock()->now() < rain_resume;
     if (rain_delay) {
-      ROS_INFO_STREAM_THROTTLE(300, "Rain delay: " << int((rain_resume - ros::Time::now()).toSec() / 60) << " minutes");
+      static auto last_log = rosNode->get_clock()->now();
+      if ((rosNode->get_clock()->now() - last_log).seconds() > 300) {
+        RCLCPP_INFO(rosNode->get_logger(), "Rain delay: %d minutes",
+                    int((rain_resume - rosNode->get_clock()->now()).seconds() / 60));
+        last_log = rosNode->get_clock()->now();
+      }
     }
     const bool mower_ready = last_power.v_battery > last_power_config.battery_full_voltage &&
                              last_status.mower_motor_temperature < last_config.motor_cold_temperature &&
@@ -91,7 +100,7 @@ Behavior* IdleBehavior::execute() {
       // set the robot's position to the dock if we're actually docked
       if (last_power.v_charge > 5.0) {
         if (PerimeterUndockingBehavior::configured(config)) return &PerimeterUndockingBehavior::INSTANCE;
-        ROS_INFO_STREAM("Currently inside the docking station, we set the robot's pose to the docks pose.");
+        RCLCPP_INFO(rosNode->get_logger(), "Currently inside the docking station, we set the robot's pose to the docks pose.");
         setRobotPose(docking_pose_stamped.pose);
         return &UndockingBehavior::INSTANCE;
       }
@@ -110,7 +119,7 @@ Behavior* IdleBehavior::execute() {
     }
 
     if (last_config.docking_redock && stay_docked && last_power.v_charge < 5.0) {
-      ROS_WARN("We docked but seem to have lost contact with the charger.  Undocking and trying again!");
+      RCLCPP_WARN(rosNode->get_logger(), "We docked but seem to have lost contact with the charger.  Undocking and trying again!");
       return &UndockingBehavior::RETRY_INSTANCE;
     }
 
@@ -181,18 +190,18 @@ uint8_t IdleBehavior::get_sub_state() {
 }
 
 uint8_t IdleBehavior::get_state() {
-  return mower_msgs::HighLevelStatus::HIGH_LEVEL_STATE_IDLE;
+  return mower_msgs::msg::HighLevelStatus::HIGH_LEVEL_STATE_IDLE;
 }
 
 IdleBehavior::IdleBehavior(bool stayDocked) {
   this->stay_docked = stayDocked;
 
-  xbot_msgs::ActionInfo start_mowing_action;
+  xbot_msgs::msg::ActionInfo start_mowing_action;
   start_mowing_action.action_id = "start_mowing";
   start_mowing_action.enabled = false;
   start_mowing_action.action_name = "Start Mowing";
 
-  xbot_msgs::ActionInfo start_area_recording_action;
+  xbot_msgs::msg::ActionInfo start_area_recording_action;
   start_area_recording_action.action_id = "start_area_recording";
   start_area_recording_action.enabled = false;
   start_area_recording_action.action_name = "Start Area Recording";
@@ -204,10 +213,10 @@ IdleBehavior::IdleBehavior(bool stayDocked) {
 
 void IdleBehavior::handle_action(std::string action) {
   if (action == "mower_logic:idle/start_mowing") {
-    ROS_INFO_STREAM("Got start_mowing command");
+    RCLCPP_INFO(rosNode->get_logger(), "Got start_mowing command");
     command_start();
   } else if (action == "mower_logic:idle/start_area_recording") {
-    ROS_INFO_STREAM("Got start_area_recording command");
+    RCLCPP_INFO(rosNode->get_logger(), "Got start_area_recording command");
     command_s1();
   }
 }

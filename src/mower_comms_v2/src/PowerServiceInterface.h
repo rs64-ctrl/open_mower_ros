@@ -5,18 +5,21 @@
 #ifndef POWERSERVICEINTERFACE_H
 #define POWERSERVICEINTERFACE_H
 
-#include <mower_msgs/Power.h>
-#include <ros/publisher.h>
+#include <rclcpp/rclcpp.hpp>
+#include <mower_msgs/msg/power.hpp>
 
 #include <PowerServiceInterfaceBase.hpp>
 
 class PowerServiceInterface : public PowerServiceInterfaceBase {
  public:
   PowerServiceInterface(uint16_t service_id, const xbot::serviceif::Context& ctx,
-                        const ros::Publisher& status_publisher, float battery_full_voltage, float battery_empty_voltage,
+                        const rclcpp::Publisher<mower_msgs::msg::Power>::SharedPtr& status_publisher,
+                        float battery_full_voltage, float battery_empty_voltage,
                         float battery_critical_voltage, float battery_critical_high_voltage,
-                        float battery_charge_current)
+                        float battery_charge_current,
+                        const rclcpp::Node::SharedPtr& node)
       : PowerServiceInterfaceBase(service_id, ctx),
+        node_(node),
         status_publisher_(status_publisher),
         battery_full_voltage_(battery_full_voltage),
         battery_empty_voltage_(battery_empty_voltage),
@@ -36,8 +39,10 @@ class PowerServiceInterface : public PowerServiceInterfaceBase {
  private:
   void OnTransactionStart(uint64_t timestamp) override;
   void OnTransactionEnd() override;
-  mower_msgs::Power power_msg_{};
-  const ros::Publisher& status_publisher_;
+
+  rclcpp::Node::SharedPtr node_;
+  mower_msgs::msg::Power power_msg_{};
+  rclcpp::Publisher<mower_msgs::msg::Power>::SharedPtr status_publisher_;
 
   float battery_full_voltage_;
   float battery_empty_voltage_;

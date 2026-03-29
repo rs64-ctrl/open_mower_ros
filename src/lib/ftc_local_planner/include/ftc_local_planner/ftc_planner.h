@@ -2,26 +2,28 @@
 #ifndef FTC_LOCAL_PLANNER_FTC_PLANNER_H_
 #define FTC_LOCAL_PLANNER_FTC_PLANNER_H_
 
-#include <ros/ros.h>
-#include "ftc_local_planner/PlannerGetProgress.h"
-#include "ftc_local_planner/oscillation_detector.h"
+#include <rclcpp/rclcpp.hpp>
+#include <rcl_interfaces/msg/set_parameters_result.hpp>
 
-#include <nav_msgs/Odometry.h>
-#include <nav_msgs/Path.h>
-#include <costmap_2d/costmap_2d_ros.h>
-#include <tf/transform_listener.h>
-#include <dynamic_reconfigure/server.h>
-#include <ftc_local_planner/FTCPlannerConfig.h>
-#include <ftc_local_planner/PID.h>
-#include <nav_core/base_local_planner.h>
+#include "ftc_local_planner/costmap_controller_interface.h"
+#include "ftc_local_planner/oscillation_detector.h"
+#include "ftc_local_planner/ftc_planner_config.h"
+
+#include <nav_msgs/msg/odometry.hpp>
+#include <nav_msgs/msg/path.hpp>
+#include <nav2_costmap_2d/costmap_2d_ros.hpp>
 #include <tf2_ros/transform_broadcaster.h>
 #include <tf2/LinearMath/Quaternion.h>
-#include <tf2_geometry_msgs/tf2_geometry_msgs.h>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include <tf2_ros/transform_listener.h>
+#include <tf2_ros/buffer.h>
 #include <Eigen/Geometry>
-#include "tf2_eigen/tf2_eigen.h"
-#include <mbf_costmap_core/costmap_controller.h>
-#include <visualization_msgs/Marker.h>
+#include <tf2_eigen/tf2_eigen.hpp>
+#include <visualization_msgs/msg/marker.hpp>
+
+// Forward declare generated service type
+#include "ftc_local_planner/srv/planner_get_progress.hpp"
+#include "ftc_local_planner/msg/pid.hpp"
 
 namespace ftc_local_planner
 {
@@ -39,26 +41,29 @@ namespace ftc_local_planner
         };
 
     private:
-        ros::ServiceServer progress_server;
+        rclcpp::Node::SharedPtr node_;
+        rclcpp::Service<ftc_local_planner::srv::PlannerGetProgress>::SharedPtr progress_server_;
+
         // State tracking
         PlannerState current_state;
-        ros::Time state_entered_time;
+        rclcpp::Time state_entered_time;
 
         bool is_crashed;
 
-        dynamic_reconfigure::Server<FTCPlannerConfig> *reconfig_server;
+        // Parameter callback handle
+        rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr param_callback_handle_;
 
         tf2_ros::Buffer *tf_buffer;
-        costmap_2d::Costmap2DROS *costmap;
-        costmap_2d::Costmap2D* costmap_map_;   
+        nav2_costmap_2d::Costmap2DROS *costmap;
+        nav2_costmap_2d::Costmap2D *costmap_map_;
 
-        std::vector<geometry_msgs::PoseStamped> global_plan;
-        ros::Publisher global_point_pub;
-        ros::Publisher global_plan_pub;
-        ros::Publisher progress_pub;
-        ros::Publisher obstacle_marker_pub;
+        std::vector<geometry_msgs::msg::PoseStamped> global_plan;
+        rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr global_point_pub;
+        rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr global_plan_pub;
+        rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr obstacle_marker_pub;
 
         FTCPlannerConfig config;
+        FTCPlannerConfig default_config;  // stores defaults for restore
 
         Eigen::Affine3d current_control_point;
 
@@ -72,7 +77,7 @@ namespace ftc_local_planner
         double i_lon_error = 0.0;
         double i_lat_error = 0.0;
         double i_angle_error = 0.0;
-        ros::Time last_time;
+        rclcpp::Time last_time;
 
         /**
          * Speed ramp for acceleration and deceleration
@@ -89,65 +94,52 @@ namespace ftc_local_planner
         /**
          * Private members
          */
-        ros::Publisher pubPid;
-        FailureDetector failure_detector_; //!< Detect if the robot got stucked
-        ros::Time time_last_oscillation_;  //!< Store at which time stamp the last oscillation was detected
+        rclcpp::Publisher<ftc_local_planner::msg::PID>::SharedPtr pubPid;
+        FailureDetector failure_detector_;
+        rclcpp::Time time_last_oscillation_;
         bool oscillation_detected_ = false;
         bool oscillation_warning_ = false;
 
         double distanceLookahead();
         PlannerState update_planner_state();
         void update_control_point(double dt);
-        void calculate_velocity_commands(double dt, geometry_msgs::TwistStamped &cmd_vel);
+        void calculate_velocity_commands(double dt, geometry_msgs::msg::TwistStamped &cmd_vel);
 
-        /**
-         * @brief check for obstacles in path as well as collision at actual pose
-         * @param max_points number of path segments (of global path) to check
-         * @return true if collision will happen.
-         */
         bool checkCollision(int max_points);
-
-        /**
-         * @brief check if robot oscillates (only angular). Can be used to do some recovery
-         * @param cmd_vel last velocity message send to robot
-         * @return true if robot oscillates
-         */
-        bool checkOscillation(geometry_msgs::TwistStamped &cmd_vel);
-
-        /**
-         * @brief publish obstacles on path as marker array.
-         * @brief If obstacle_points contains more elements than maxID, marker gets published and
-         * @brief cleared afterwards.
-         * @param obstacle_points already collected points to visualize
-         * @param x X position in costmap
-         * @param y Y position in costmap
-         * @param cost cost value of cell
-         * @param maxIDs num of markers before publishing
-         * @return sum of `values`, or 0.0 if `values` is empty.
-         */
-        void debugObstacle(visualization_msgs::Marker &obstacle_points, double x, double y, unsigned char cost, int maxIDs);
+        bool checkOscillation(geometry_msgs::msg::TwistStamped &cmd_vel);
+        void debugObstacle(visualization_msgs::msg::Marker &obstacle_points, double x, double y, unsigned char cost, int maxIDs);
 
         double time_in_current_state()
         {
-            return (ros::Time::now() - state_entered_time).toSec();
+            return (node_->now() - state_entered_time).seconds();
         }
 
-        void reconfigureCB(FTCPlannerConfig &config, uint32_t level);
+        void declareParameters();
+        rcl_interfaces::msg::SetParametersResult parametersCallback(
+            const std::vector<rclcpp::Parameter> &parameters);
 
     public:
         FTCPlanner();
 
-        bool getProgress(ftc_local_planner::PlannerGetProgressRequest &req, ftc_local_planner::PlannerGetProgressResponse &res);
+        void getProgress(
+            const std::shared_ptr<ftc_local_planner::srv::PlannerGetProgress::Request> request,
+            std::shared_ptr<ftc_local_planner::srv::PlannerGetProgress::Response> response);
 
-        bool setPlan(const std::vector<geometry_msgs::PoseStamped> &plan) override;
+        bool setPlan(const std::vector<geometry_msgs::msg::PoseStamped> &plan) override;
 
-        void initialize(std::string name, tf2_ros::Buffer *tf, costmap_2d::Costmap2DROS *costmap_ros) override;
+        void initialize(
+            std::string name,
+            const rclcpp::Node::SharedPtr & node,
+            tf2_ros::Buffer *tf,
+            nav2_costmap_2d::Costmap2DROS *costmap_ros) override;
 
         ~FTCPlanner() override;
 
         uint32_t
-        computeVelocityCommands(const geometry_msgs::PoseStamped &pose, const geometry_msgs::TwistStamped &velocity,
-                                geometry_msgs::TwistStamped &cmd_vel, std::string &message) override;
+        computeVelocityCommands(const geometry_msgs::msg::PoseStamped &pose,
+                                const geometry_msgs::msg::TwistStamped &velocity,
+                                geometry_msgs::msg::TwistStamped &cmd_vel,
+                                std::string &message) override;
 
         bool isGoalReached(double dist_tolerance, double angle_tolerance) override;
 

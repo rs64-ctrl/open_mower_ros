@@ -1,18 +1,18 @@
-cmake_minimum_required(VERSION 3.1)
+cmake_minimum_required(VERSION 3.8)
 
 project(xesc_interface)
 
 set(CMAKE_CXX_STANDARD 17)
 
-find_package(catkin REQUIRED)
-catkin_package(
-        INCLUDE_DIRS include
+find_package(ament_cmake REQUIRED)
+find_package(xesc_msgs REQUIRED)
+
+# Header-only library - install headers
+install(DIRECTORY include/
+  DESTINATION include
 )
 
-include_directories(include ${catkin_INCLUDE_DIRS})
-add_definitions(${catkin_DEFINITIONS})
+ament_export_include_directories(include)
+ament_export_dependencies(xesc_msgs)
 
-install(DIRECTORY include ${PROJECT_NAME}/
-        DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
-        FILES_MATCHING PATTERN "*.h"
-        )
+ament_package()

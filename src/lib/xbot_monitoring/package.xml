@@ -1,5 +1,6 @@
 <?xml version="1.0"?>
-<package format="2">
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
   <name>xbot_monitoring</name>
   <version>0.0.0</version>
   <description>The xbot_monitoring package</description>
@@ -8,25 +9,23 @@
 
   <url type="website">https://github.com/ClemensElflein</url>
 
-  <buildtool_depend>catkin</buildtool_depend>
-  <build_depend>xbot_msgs</build_depend>
-  <build_depend>roscpp</build_depend>
-  <build_export_depend>xbot_msgs</build_export_depend>
-  <build_export_depend>roscpp</build_export_depend>
-  <exec_depend>xbot_msgs</exec_depend>
-  <exec_depend>roscpp</exec_depend>
-  <depend>paho-mqtt-cpp</depend>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>xbot_msgs</depend>
   <depend>geometry_msgs</depend>
   <depend>std_msgs</depend>
-  <depend>grid_map</depend>
+  <depend>sensor_msgs</depend>
   <depend>grid_map_core</depend>
   <depend>grid_map_ros</depend>
   <depend>grid_map_msgs</depend>
   <depend>xbot_rpc</depend>
+  <build_depend>nlohmann-json-dev</build_depend>
+  <build_depend>libpaho-mqtt-dev</build_depend>
+  <build_depend>libpaho-mqttpp-dev</build_depend>
+  <build_depend>libboost-dev</build_depend>
 
-  <!-- The export tag contains other, unspecified, tags -->
   <export>
-    <!-- Other tools can request additional information be placed here -->
-
+    <build_type>ament_cmake</build_type>
   </export>
 </package>

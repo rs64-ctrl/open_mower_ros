@@ -1,38 +1,33 @@
 <?xml version="1.0"?>
-<package format="2">
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
   <name>mower_comms_v1</name>
   <version>0.0.0</version>
-  <description>The mower_comms_v1 package</description>
+  <description>The mower_comms_v1 package - legacy serial COBS communication with low-level board</description>
   <maintainer email="clemens1@familie-elflein.de">Clemens Elflein</maintainer>
   <license>CC BY-NC-SA 4.0</license>
 
   <url type="website">https://github.com/ClemensElflein/OpenMower</url>
 
-  <buildtool_depend>catkin</buildtool_depend>
-  <depend>xbot_framework</depend>
-  <build_depend>xbot_msgs</build_depend>
-  <build_depend>mower_msgs</build_depend>
-  <build_depend>sensor_msgs</build_depend>
-  <build_depend>roscpp</build_depend>
-  <build_depend>serial</build_depend>
-  <build_depend>xesc_driver</build_depend>
-  <build_depend>ublox_msgs</build_depend>
-  <build_export_depend>xbot_msgs</build_export_depend>
-  <build_export_depend>mower_msgs</build_export_depend>
-  <build_export_depend>roscpp</build_export_depend>
-  <build_export_depend>serial</build_export_depend>
-  <build_export_depend>xesc_driver</build_export_depend>
-  <exec_depend>xbot_msgs</exec_depend>
-  <exec_depend>mower_msgs</exec_depend>
-  <exec_depend>roscpp</exec_depend>
-  <exec_depend>serial</exec_depend>
-  <exec_depend>xesc_driver</exec_depend>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <!-- ROS2 core -->
+  <depend>rclcpp</depend>
+  <depend>sensor_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>std_msgs</depend>
+
+  <!-- Custom message packages -->
+  <depend>xbot_msgs</depend>
+  <depend>mower_msgs</depend>
   <depend>xesc_msgs</depend>
+  <depend>xesc_driver</depend>
 
+  <!-- System dependencies -->
+  <build_depend>libboost-dev</build_depend>
+  <build_depend>libserial-dev</build_depend>
 
-  <!-- The export tag contains other, unspecified, tags -->
   <export>
-    <!-- Other tools can request additional information be placed here -->
-
+    <build_type>ament_cmake</build_type>
   </export>
 </package>

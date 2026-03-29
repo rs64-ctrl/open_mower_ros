@@ -3,7 +3,7 @@ uint8 MOWER_STATUS_OK=255
 
 
 
-time stamp
+builtin_interfaces/Time stamp
 # Low level stuff
 # Initialized or not
 uint8 mower_status

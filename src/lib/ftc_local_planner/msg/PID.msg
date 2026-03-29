@@ -1,4 +1,4 @@
-time stamp
+builtin_interfaces/Time stamp
 
 # P set point
 float32 kp_lon_set

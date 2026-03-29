@@ -1,4 +1,4 @@
-<library path="lib/libftc_local_planner">
+<library path="ftc_local_planner_lib">
   <class name="ftc_local_planner/FTCPlanner" type="ftc_local_planner::FTCPlanner" base_class_type="mbf_costmap_core::CostmapController">
     <description>
       A implementation of a local planner using a FTC algorithmus.

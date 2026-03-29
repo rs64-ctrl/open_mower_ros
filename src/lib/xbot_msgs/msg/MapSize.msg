@@ -1,4 +1,4 @@
-float64 mapWidth
-float64 mapHeight
-float64 mapCenterX
-float64 mapCenterY
+float64 map_width
+float64 map_height
+float64 map_center_x
+float64 map_center_y

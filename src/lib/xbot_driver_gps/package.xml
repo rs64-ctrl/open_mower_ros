@@ -1,0 +1,31 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>xbot_driver_gps</name>
+  <version>0.0.0</version>
+  <description>The xbot_driver_gps package</description>
+  <maintainer email="clemens.elflein@googlemail.com">Clemens Elflein</maintainer>
+  <license>MIT</license>
+
+  <url type="website">https://github.com/ClemensElflein</url>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>xbot_msgs</depend>
+  <depend>serial</depend>
+  <depend>robot_localization</depend>
+  <depend>tf2</depend>
+  <depend>tf2_geometry_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>nmea_msgs</depend>
+  <depend>rtcm_msgs</depend>
+  <build_depend>libgeographiclib-dev</build_depend>
+  <build_depend>libboost-dev</build_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

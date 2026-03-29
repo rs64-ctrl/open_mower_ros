@@ -1,5 +1,6 @@
 <?xml version="1.0"?>
-<package format="2">
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
   <name>mower_logic</name>
   <version>0.0.0</version>
   <description>The mower_logic package</description>
@@ -8,55 +9,38 @@
 
   <url type="website">https://github.com/ClemensElflein/OpenMower</url>
 
-  <buildtool_depend>catkin</buildtool_depend>
-  <build_depend>dynamic_reconfigure</build_depend>
-  <build_depend>ftc_local_planner</build_depend>
-  <build_depend>mbf_msgs</build_depend>
-  <build_depend>mower_map</build_depend>
-  <build_depend>mower_msgs</build_depend>
-  <build_depend>nav_msgs</build_depend>
-  <build_depend>roscpp</build_depend>
-  <build_depend>slic3r_coverage_planner</build_depend>
-  <build_depend>tf2</build_depend>
-  <build_depend>tf2_geometry_msgs</build_depend>
-  <build_depend>tf2_ros</build_depend>
-  <build_depend>visualization_msgs</build_depend>
-  <build_depend>visualization_msgs</build_depend>
-  <build_depend>sensor_msgs</build_depend>
-  <build_depend>xbot_msgs</build_depend>
-  <build_depend>crypto++</build_depend>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>rosidl_default_generators</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>rclcpp_action</depend>
+  <depend>ftc_local_planner</depend>
+  <depend>mbf_msgs</depend>
+  <depend>mower_map</depend>
+  <depend>mower_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>slic3r_coverage_planner</depend>
+  <depend>tf2</depend>
+  <depend>tf2_geometry_msgs</depend>
+  <depend>tf2_ros</depend>
+  <depend>tf2_eigen</depend>
+  <depend>visualization_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>xbot_msgs</depend>
   <depend>xbot_positioning</depend>
-  <build_export_depend>dynamic_reconfigure</build_export_depend>
-  <build_export_depend>ftc_local_planner</build_export_depend>
-  <build_export_depend>mbf_msgs</build_export_depend>
-  <build_export_depend>mower_map</build_export_depend>
-  <build_export_depend>mower_msgs</build_export_depend>
-  <build_export_depend>nav_msgs</build_export_depend>
-  <build_export_depend>roscpp</build_export_depend>
-  <build_export_depend>slic3r_coverage_planner</build_export_depend>
-  <build_export_depend>tf2</build_export_depend>
-  <build_export_depend>tf2_geometry_msgs</build_export_depend>
-  <build_export_depend>tf2_ros</build_export_depend>
-  <build_export_depend>xbot_msgs</build_export_depend>
-  <exec_depend>dynamic_reconfigure</exec_depend>
-  <exec_depend>ftc_local_planner</exec_depend>
-  <exec_depend>mbf_msgs</exec_depend>
+  <depend>geometry_msgs</depend>
+  <depend>std_msgs</depend>
+
+  <build_depend>libcrypto++-dev</build_depend>
+  <exec_depend>libcrypto++-dev</exec_depend>
+
   <exec_depend>joy</exec_depend>
-  <exec_depend>mower_map</exec_depend>
-  <exec_depend>mower_msgs</exec_depend>
-  <exec_depend>nav_msgs</exec_depend>
-  <exec_depend>roscpp</exec_depend>
-  <exec_depend>slic3r_coverage_planner</exec_depend>
-  <exec_depend>tf2</exec_depend>
-  <exec_depend>tf2_geometry_msgs</exec_depend>
-  <exec_depend>tf2_ros</exec_depend>
   <exec_depend>imu_tools</exec_depend>
-  <exec_depend>xbot_msgs</exec_depend>
+  <exec_depend>rosidl_default_runtime</exec_depend>
 
+  <member_of_group>rosidl_interface_packages</member_of_group>
 
-  <!-- The export tag contains other, unspecified, tags -->
   <export>
-    <!-- Other tools can request additional information be placed here -->
-
+    <build_type>ament_cmake</build_type>
   </export>
 </package>

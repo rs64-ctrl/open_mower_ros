@@ -4,8 +4,6 @@
 
 #include "EmergencyServiceInterface.h"
 
-#include <mower_msgs/Emergency.h>
-
 bool EmergencyServiceInterface::SetEmergency(bool new_value) {
   std::unique_lock<std::recursive_mutex> lk{state_mutex_};
   // Set the high level emergency
@@ -68,14 +66,14 @@ void EmergencyServiceInterface::OnServiceDisconnected(uint16_t service_id) {
 }
 
 void EmergencyServiceInterface::PublishEmergencyState() {
-  mower_msgs::Emergency emergency_{};
+  mower_msgs::msg::Emergency emergency_{};
   std::unique_lock<std::recursive_mutex> lk{state_mutex_};
-  emergency_.stamp = ros::Time::now();
+  emergency_.stamp = node_->get_clock()->now();
   // Make sure the latch is set, if there's an active emergency
   latched_emergency_ |= active_high_level_emergency_ | active_low_level_emergency_;
 
   emergency_.latched_emergency = latched_emergency_;
   emergency_.active_emergency = active_high_level_emergency_ | active_low_level_emergency_;
   emergency_.reason = latest_emergency_reason_;
-  publisher.publish(emergency_);
+  publisher_->publish(emergency_);
 }

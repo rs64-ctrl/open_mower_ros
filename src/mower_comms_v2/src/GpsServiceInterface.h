@@ -4,16 +4,22 @@
 
 #ifndef GPSSERVICEINTERFACE_H
 #define GPSSERVICEINTERFACE_H
-#include <ros/publisher.h>
-#include <xbot_msgs/AbsolutePose.h>
+
+#include <rclcpp/rclcpp.hpp>
+#include <xbot_msgs/msg/absolute_pose.hpp>
+#include <nmea_msgs/msg/sentence.hpp>
 
 #include <GpsServiceInterfaceBase.hpp>
 
 class GpsServiceInterface : public GpsServiceInterfaceBase {
  public:
-  GpsServiceInterface(uint16_t service_id, const xbot::serviceif::Context& ctx, const ros::Publisher& imu_publisher,
-                      const ros::Publisher& nmea_publisher, double datum_lat, double datum_long, double datum_height,
-                      uint32_t baud_rate, const std::string& protocol, uint8_t port_index, bool absolute_coords);
+  GpsServiceInterface(uint16_t service_id, const xbot::serviceif::Context& ctx,
+                      const rclcpp::Publisher<xbot_msgs::msg::AbsolutePose>::SharedPtr& absolute_pose_publisher,
+                      const rclcpp::Publisher<nmea_msgs::msg::Sentence>::SharedPtr& nmea_publisher,
+                      double datum_lat, double datum_long, double datum_height,
+                      uint32_t baud_rate, const std::string& protocol, uint8_t port_index,
+                      bool absolute_coords,
+                      const rclcpp::Node::SharedPtr& node);
 
   bool OnConfigurationRequested(uint16_t service_id) override;
 
@@ -29,15 +35,16 @@ class GpsServiceInterface : public GpsServiceInterfaceBase {
   void OnTransactionStart(uint64_t timestamp) override;
   void OnTransactionEnd() override;
 
-  const ros::Publisher& absolute_pose_publisher_;
-  const ros::Publisher& nmea_publisher_;
+  rclcpp::Node::SharedPtr node_;
+  rclcpp::Publisher<xbot_msgs::msg::AbsolutePose>::SharedPtr absolute_pose_publisher_;
+  rclcpp::Publisher<nmea_msgs::msg::Sentence>::SharedPtr nmea_publisher_;
 
   std::string protocol_;
   uint32_t baud_rate_;
   uint8_t port_index_;
   bool absolute_coords_;
 
-  xbot_msgs::AbsolutePose pose_msg_{};
+  xbot_msgs::msg::AbsolutePose pose_msg_{};
   double datum_e_, datum_n_, datum_u_;
   std::string datum_zone_;
   void SendNMEA(double lat_in, double lon_in);

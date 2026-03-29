@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>xbot_framework</name>
+  <version>0.0.0</version>
+  <description>The xbot_framework package</description>
+  <maintainer email="clemens.elflein@googlemail.com">Clemens Elflein</maintainer>
+  <license>MIT</license>
+
+  <url type="website">https://github.com/ClemensElflein</url>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>python3-pip</buildtool_depend>
+  <buildtool_depend>python3-venv</buildtool_depend>
+  <build_depend>asio</build_depend>
+  <build_depend>libspdlog-dev</build_depend>
+  <build_depend>nlohmann-json-dev</build_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

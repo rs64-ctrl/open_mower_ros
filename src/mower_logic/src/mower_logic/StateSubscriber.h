@@ -5,20 +5,20 @@
 #ifndef STATESUBSCRIBER_H
 #define STATESUBSCRIBER_H
 
-#include "ros/ros.h"
+#include <rclcpp/rclcpp.hpp>
 
 template <typename MESSAGE>
 class StateSubscriber {
  public:
   explicit StateSubscriber(const std::string& topic);
 
-  void Start(ros::NodeHandle* n);
+  void Start(rclcpp::Node::SharedPtr n);
 
   MESSAGE getMessage();
 
   bool hasMessage();
 
-  ros::Time getMessageTime();
+  rclcpp::Time getMessageTime();
 
   void setMessage(const MESSAGE& message);
 
@@ -26,9 +26,10 @@ class StateSubscriber {
   std::string topic_;
   std::mutex message_mutex_{};
   MESSAGE message_{};
-  ros::Time last_message_time_{};
+  rclcpp::Time last_message_time_{0, 0, RCL_ROS_TIME};
   bool has_message_ = false;
-  ros::Subscriber subscriber_{};
+  typename rclcpp::Subscription<MESSAGE>::SharedPtr subscriber_{};
+  rclcpp::Node::SharedPtr node_{};
 };
 
 template <typename MESSAGE>
@@ -36,8 +37,13 @@ StateSubscriber<MESSAGE>::StateSubscriber(const std::string& topic) : topic_{top
 }
 
 template <typename MESSAGE>
-void StateSubscriber<MESSAGE>::Start(ros::NodeHandle* n) {
-  subscriber_ = n->subscribe(topic_, 10, &StateSubscriber::setMessage, this);
+void StateSubscriber<MESSAGE>::Start(rclcpp::Node::SharedPtr n) {
+  node_ = n;
+  subscriber_ = n->create_subscription<MESSAGE>(
+      topic_, 10,
+      [this](const typename MESSAGE::SharedPtr msg) {
+        this->setMessage(*msg);
+      });
 }
 
 template <typename MESSAGE>
@@ -53,7 +59,7 @@ bool StateSubscriber<MESSAGE>::hasMessage() {
 }
 
 template <typename MESSAGE>
-ros::Time StateSubscriber<MESSAGE>::getMessageTime() {
+rclcpp::Time StateSubscriber<MESSAGE>::getMessageTime() {
   std::lock_guard<std::mutex> lk{message_mutex_};
   return last_message_time_;
 }
@@ -61,7 +67,9 @@ ros::Time StateSubscriber<MESSAGE>::getMessageTime() {
 template <typename MESSAGE>
 void StateSubscriber<MESSAGE>::setMessage(const MESSAGE& message) {
   std::lock_guard<std::mutex> lk{message_mutex_};
-  last_message_time_ = ros::Time::now();
+  if (node_) {
+    last_message_time_ = node_->get_clock()->now();
+  }
   message_ = message;
   has_message_ = true;
 }

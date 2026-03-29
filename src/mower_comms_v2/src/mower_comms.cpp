@@ -13,16 +13,21 @@
 // You should have received a copy of the GNU General Public License along with OpenMower. If not, see
 // <https://www.gnu.org/licenses/>.
 //
-#include <geometry_msgs/TwistStamped.h>
-#include <mower_msgs/ESCStatus.h>
-#include <mower_msgs/Emergency.h>
-#include <mower_msgs/EmergencyStopSrv.h>
-#include <mower_msgs/HighLevelControlSrv.h>
-#include <mower_msgs/MowerControlSrv.h>
-#include <nmea_msgs/Sentence.h>
-#include <ros/ros.h>
-#include <rtcm_msgs/Message.h>
-#include <sensor_msgs/Imu.h>
+#include "roslog_compat.hpp"
+
+#include <rclcpp/rclcpp.hpp>
+#include <geometry_msgs/msg/twist.hpp>
+#include <geometry_msgs/msg/twist_stamped.hpp>
+#include <mower_msgs/msg/esc_status.hpp>
+#include <mower_msgs/msg/emergency.hpp>
+#include <mower_msgs/msg/status.hpp>
+#include <mower_msgs/msg/power.hpp>
+#include <mower_msgs/srv/emergency_stop_srv.hpp>
+#include <mower_msgs/srv/high_level_control_srv.hpp>
+#include <mower_msgs/srv/mower_control_srv.hpp>
+#include <nmea_msgs/msg/sentence.hpp>
+#include <rtcm_msgs/msg/message.hpp>
+#include <sensor_msgs/msg/imu.hpp>
 #include <spdlog/sinks/callback_sink.h>
 #include <spdlog/spdlog.h>
 
@@ -34,18 +39,7 @@
 #include "MowerServiceInterface.h"
 #include "PowerServiceInterface.h"
 
-ros::Publisher status_pub;
-ros::Publisher nmea_pub;
-ros::Publisher power_pub;
-ros::Publisher gps_position_pub;
-ros::Publisher status_left_esc_pub;
-ros::Publisher status_right_esc_pub;
-ros::Publisher emergency_pub;
-ros::Publisher actual_twist_pub;
-
-ros::Publisher sensor_imu_pub;
-
-ros::ServiceClient highLevelClient;
+using namespace std::chrono_literals;
 
 std::unique_ptr<EmergencyServiceInterface> emergency_service = nullptr;
 std::unique_ptr<DiffDriveServiceInterface> diff_drive_service = nullptr;
@@ -56,63 +50,24 @@ std::unique_ptr<GpsServiceInterface> gps_service = nullptr;
 
 xbot::serviceif::Context ctx{};
 
-bool setEmergencyStop(mower_msgs::EmergencyStopSrvRequest& req, mower_msgs::EmergencyStopSrvResponse& res) {
-  // This should never be the case, also this is no race condition, because callback will only be called
-  // after initialization whereas the service is created during intialization
-  if (!emergency_service) return false;
-
-  emergency_service->SetEmergency(req.emergency);
-  return true;
-}
-
-void velReceived(const geometry_msgs::Twist::ConstPtr& msg) {
-  if (!diff_drive_service) return;
-  diff_drive_service->SendTwist(msg);
-}
-
-void rtcmReceived(const rtcm_msgs::Message& msg) {
-  if (!gps_service) return;
-  static std::vector<uint8_t> rtcm_buffer{};
-  static ros::Time last_time_sent{0};
-  ros::Time now = ros::Time::now();
-  // Append the bytes to the buffer
-  rtcm_buffer.insert(rtcm_buffer.end(), msg.message.begin(), msg.message.end());
-  // In order to not spam after each received byte, limit packets to 5Hz and to max 1k of size
-  if (rtcm_buffer.size() < 1000 && (now - last_time_sent).toSec() < 0.2) return;
-  last_time_sent = now;
-  gps_service->SendRTCM(rtcm_buffer.data(), rtcm_buffer.size());
-  rtcm_buffer.clear();
-}
-
-void sendEmergencyHeartbeatTimerTask(const ros::TimerEvent&) {
-  emergency_service->Heartbeat();
-}
-
-void sendMowerEnabledTimerTask(const ros::TimerEvent& e) {
-  mower_service->Tick();
-}
-
-bool setMowEnabled(mower_msgs::MowerControlSrvRequest& req, mower_msgs::MowerControlSrvResponse& res) {
-  mower_service->SetMowerEnabled(req.mow_enabled);
-  return true;
-}
+static rclcpp::Logger g_logger = rclcpp::get_logger("mower_comms_v2");
 
 static void spdlog_cb(const spdlog::details::log_msg& msg) {
-  ros::console::Level level = ros::console::Level::Info;
+  std::string s(msg.payload.begin(), msg.payload.end());
   switch (msg.level) {
-    case spdlog::level::level_enum::trace:
-    case spdlog::level::level_enum::debug: level = ros::console::Level::Debug; break;
-    case spdlog::level::level_enum::info: break;
-    case spdlog::level::level_enum::warn: level = ros::console::Level::Warn; break;
-    case spdlog::level::level_enum::err: level = ros::console::Level::Error; break;
-    case spdlog::level::level_enum::critical: level = ros::console::Level::Fatal; break;
-    case spdlog::level::level_enum::off: return;
+    case spdlog::level::trace:
+    case spdlog::level::debug: RCLCPP_DEBUG(g_logger, "%s", s.c_str()); break;
+    case spdlog::level::info:  RCLCPP_INFO(g_logger, "%s", s.c_str()); break;
+    case spdlog::level::warn:  RCLCPP_WARN(g_logger, "%s", s.c_str()); break;
+    case spdlog::level::err:   RCLCPP_ERROR(g_logger, "%s", s.c_str()); break;
+    case spdlog::level::critical: RCLCPP_FATAL(g_logger, "%s", s.c_str()); break;
+    case spdlog::level::off: default: break;
   }
-  ROS_LOG(level, ROSCONSOLE_DEFAULT_NAME, "%.*s", static_cast<int>(msg.payload.size()), msg.payload.data());
 }
 
 int main(int argc, char** argv) {
-  ros::init(argc, argv, "mower_comms_v2");
+  rclcpp::init(argc, argv);
+  auto node = rclcpp::Node::make_shared("mower_comms_v2");
 
   {
     auto sink = std::make_shared<spdlog::sinks::callback_sink_mt>(spdlog_cb);
@@ -120,131 +75,180 @@ int main(int argc, char** argv) {
     spdlog::set_default_logger(logger);
   }
 
-  ros::NodeHandle n;
-  ros::NodeHandle paramNh("/ll");
+  // ---------- Parameters (ROS1 had /ll namespace; we use ll. prefix) ----------
+  node->declare_parameter<std::string>("ll.bind_ip", "0.0.0.0");
+  std::string bind_ip = node->get_parameter("ll.bind_ip").as_string();
+  RCLCPP_INFO(node->get_logger(), "Bind IP (Robot Internal): %s", bind_ip.c_str());
 
-  highLevelClient = n.serviceClient<mower_msgs::HighLevelControlSrv>("mower_service/high_level_control");
+  // High level control service client
+  auto highLevelClient = node->create_client<mower_msgs::srv::HighLevelControlSrv>("mower_service/high_level_control");
 
-  ros::ServiceServer mow_service = n.advertiseService("ll/_service/mow_enabled", setMowEnabled);
-  ros::ServiceServer ros_emergency_service = n.advertiseService("ll/_service/emergency", setEmergencyStop);
-  ros::Subscriber cmd_vel_sub = n.subscribe("ll/cmd_vel", 0, velReceived, ros::TransportHints().tcpNoDelay(true));
-  ros::Subscriber rtcm_sub = n.subscribe("ll/position/gps/rtcm", 0, rtcmReceived);
-  // ros::Subscriber high_level_status_sub = n.subscribe("/mower_logic/current_state", 0, highLevelStatusReceived);
-  ros::Timer publish_timer = n.createTimer(ros::Duration(0.5), sendEmergencyHeartbeatTimerTask);
-  ros::Timer publish_timer_2 = n.createTimer(ros::Duration(5.0), sendMowerEnabledTimerTask);
+  // Services
+  auto srv_mow_enabled = node->create_service<mower_msgs::srv::MowerControlSrv>(
+      "ll/_service/mow_enabled",
+      [](const std::shared_ptr<mower_msgs::srv::MowerControlSrv::Request> req,
+         std::shared_ptr<mower_msgs::srv::MowerControlSrv::Response> /*res*/) {
+        if (mower_service) mower_service->SetMowerEnabled(req->mow_enabled);
+      });
 
-  std::string bind_ip = "0.0.0.0";
-  paramNh.getParam("bind_ip", bind_ip);
-  ROS_INFO_STREAM("Bind IP (Robot Internal): " << bind_ip);
+  auto srv_emergency = node->create_service<mower_msgs::srv::EmergencyStopSrv>(
+      "ll/_service/emergency",
+      [](const std::shared_ptr<mower_msgs::srv::EmergencyStopSrv::Request> req,
+         std::shared_ptr<mower_msgs::srv::EmergencyStopSrv::Response> /*res*/) {
+        if (emergency_service) emergency_service->SetEmergency(req->emergency);
+      });
+
+  // Subscriptions
+  auto cmd_vel_sub = node->create_subscription<geometry_msgs::msg::Twist>(
+      "ll/cmd_vel", rclcpp::QoS(10),
+      [](const geometry_msgs::msg::Twist::SharedPtr msg) {
+        if (diff_drive_service) diff_drive_service->SendTwist(msg);
+      });
+
+  auto rtcm_sub = node->create_subscription<rtcm_msgs::msg::Message>(
+      "ll/position/gps/rtcm", rclcpp::QoS(100),
+      [node](const rtcm_msgs::msg::Message::SharedPtr msg) {
+        if (!gps_service) return;
+        static std::vector<uint8_t> rtcm_buffer{};
+        static rclcpp::Time last_time_sent(0, 0, node->get_clock()->get_clock_type());
+        const auto now = node->get_clock()->now();
+        // Append the bytes to the buffer
+        rtcm_buffer.insert(rtcm_buffer.end(), msg->message.begin(), msg->message.end());
+        // In order to not spam after each received byte, limit packets to 5Hz and to max 1k of size
+        if (rtcm_buffer.size() < 1000 && (now - last_time_sent).seconds() < 0.2) return;
+        last_time_sent = now;
+        gps_service->SendRTCM(rtcm_buffer.data(), rtcm_buffer.size());
+        rtcm_buffer.clear();
+      });
+
+  // Timers
+  auto t_heartbeat = node->create_wall_timer(500ms, []() {
+    if (emergency_service) emergency_service->Heartbeat();
+  });
+
+  auto t_mower_tick = node->create_wall_timer(5s, []() {
+    if (mower_service) mower_service->Tick();
+  });
+
   ctx = xbot::serviceif::Start(true, bind_ip);
 
   // Emergency service
-  emergency_pub = n.advertise<mower_msgs::Emergency>("ll/emergency", 1);
-  emergency_service = std::make_unique<EmergencyServiceInterface>(xbot::service_ids::EMERGENCY, ctx, emergency_pub);
+  auto emergency_pub = node->create_publisher<mower_msgs::msg::Emergency>("ll/emergency", rclcpp::QoS(1));
+  emergency_service = std::make_unique<EmergencyServiceInterface>(xbot::service_ids::EMERGENCY, ctx, emergency_pub, node);
   emergency_service->Start();
 
   // Diff drive service
-  actual_twist_pub = n.advertise<geometry_msgs::TwistStamped>("ll/diff_drive/measured_twist", 1);
-  status_left_esc_pub = n.advertise<mower_msgs::ESCStatus>("ll/diff_drive/left_esc_status", 1);
-  status_right_esc_pub = n.advertise<mower_msgs::ESCStatus>("ll/diff_drive/right_esc_status", 1);
-  double wheel_ticks_per_m = 0.0;
-  double wheel_distance_m = 0.0;
-  if (!paramNh.getParam("services/diff_drive/ticks_per_m", wheel_ticks_per_m)) {
-    ROS_ERROR("Need to provide param services/diff_drive/ticks_per_m");
+  auto actual_twist_pub = node->create_publisher<geometry_msgs::msg::TwistStamped>("ll/diff_drive/measured_twist", rclcpp::QoS(1));
+  auto status_left_esc_pub = node->create_publisher<mower_msgs::msg::ESCStatus>("ll/diff_drive/left_esc_status", rclcpp::QoS(1));
+  auto status_right_esc_pub = node->create_publisher<mower_msgs::msg::ESCStatus>("ll/diff_drive/right_esc_status", rclcpp::QoS(1));
+
+  node->declare_parameter<double>("ll.services.diff_drive.ticks_per_m", 0.0);
+  node->declare_parameter<double>("ll.services.diff_drive.wheel_distance_m", 0.0);
+  double wheel_ticks_per_m = node->get_parameter("ll.services.diff_drive.ticks_per_m").as_double();
+  double wheel_distance_m = node->get_parameter("ll.services.diff_drive.wheel_distance_m").as_double();
+  if (wheel_ticks_per_m == 0.0) {
+    RCLCPP_ERROR(node->get_logger(), "Need to provide param ll.services.diff_drive.ticks_per_m");
     return 1;
   }
-  if (!paramNh.getParam("services/diff_drive/wheel_distance_m", wheel_distance_m)) {
-    ROS_ERROR("Need to provide param services/diff_drive/wheel_distance_m");
+  if (wheel_distance_m == 0.0) {
+    RCLCPP_ERROR(node->get_logger(), "Need to provide param ll.services.diff_drive.wheel_distance_m");
     return 1;
   }
-  ROS_INFO_STREAM("Wheel ticks [1/m]: " << wheel_ticks_per_m);
-  ROS_INFO_STREAM("Wheel distance [m]: " << wheel_distance_m);
+  RCLCPP_INFO(node->get_logger(), "Wheel ticks [1/m]: %f", wheel_ticks_per_m);
+  RCLCPP_INFO(node->get_logger(), "Wheel distance [m]: %f", wheel_distance_m);
 
-  int baud_rate = 0;
-  paramNh.getParam("services/gps/baud_rate", baud_rate);
-
-  std::string protocol;
-  paramNh.getParam("services/gps/protocol", protocol);
-
-  int gps_port_index = 0;
-  paramNh.getParam("services/gps/port_index", gps_port_index);
+  node->declare_parameter<int>("ll.services.gps.baud_rate", 0);
+  node->declare_parameter<std::string>("ll.services.gps.protocol", "");
+  node->declare_parameter<int>("ll.services.gps.port_index", 0);
+  int baud_rate = node->get_parameter("ll.services.gps.baud_rate").as_int();
+  std::string protocol = node->get_parameter("ll.services.gps.protocol").as_string();
+  int gps_port_index = node->get_parameter("ll.services.gps.port_index").as_int();
 
   if (baud_rate == 0 || protocol.empty()) {
-    ROS_ERROR("Need to specify GPS protocol and baud rate!");
+    RCLCPP_ERROR(node->get_logger(), "Need to specify GPS protocol and baud rate!");
     return 1;
   }
 
-  ROS_INFO_STREAM("GPS protocol: " << protocol << ", baud rate: " << baud_rate
-                                   << ", gps port index:" << gps_port_index);
+  RCLCPP_INFO(node->get_logger(), "GPS protocol: %s, baud rate: %d, gps port index: %d",
+              protocol.c_str(), baud_rate, gps_port_index);
 
-  diff_drive_service = std::make_unique<DiffDriveServiceInterface>(xbot::service_ids::DIFF_DRIVE, ctx, actual_twist_pub,
-                                                                   status_left_esc_pub, status_right_esc_pub,
-                                                                   wheel_ticks_per_m, wheel_distance_m);
+  diff_drive_service = std::make_unique<DiffDriveServiceInterface>(
+      xbot::service_ids::DIFF_DRIVE, ctx, node,
+      actual_twist_pub, status_left_esc_pub, status_right_esc_pub,
+      wheel_ticks_per_m, wheel_distance_m);
   diff_drive_service->Start();
 
   // Mower service
-  status_pub = n.advertise<mower_msgs::Status>("ll/mower_status", 1);
-  mower_service = std::make_unique<MowerServiceInterface>(xbot::service_ids::MOWER, ctx, status_pub);
+  auto status_pub = node->create_publisher<mower_msgs::msg::Status>("ll/mower_status", rclcpp::QoS(1));
+  mower_service = std::make_unique<MowerServiceInterface>(xbot::service_ids::MOWER, ctx, node, status_pub);
   mower_service->Start();
 
   // IMU service
-  std::string imu_axis_config;
-  paramNh.getParam("services/imu/axis_config", imu_axis_config);
-  ROS_INFO_STREAM("IMU axis config: " << imu_axis_config);
-  sensor_imu_pub = n.advertise<sensor_msgs::Imu>("ll/imu/data_raw", 1);
-  imu_service = std::make_unique<ImuServiceInterface>(xbot::service_ids::IMU, ctx, sensor_imu_pub, imu_axis_config);
+  node->declare_parameter<std::string>("ll.services.imu.axis_config", "");
+  std::string imu_axis_config = node->get_parameter("ll.services.imu.axis_config").as_string();
+  RCLCPP_INFO(node->get_logger(), "IMU axis config: %s", imu_axis_config.c_str());
+  auto sensor_imu_pub = node->create_publisher<sensor_msgs::msg::Imu>("ll/imu/data_raw", rclcpp::QoS(1));
+  imu_service = std::make_unique<ImuServiceInterface>(xbot::service_ids::IMU, ctx, sensor_imu_pub, imu_axis_config, node);
   imu_service->Start();
 
   // Power service
-  power_pub = n.advertise<mower_msgs::Power>("ll/power", 1);
-  float battery_full_voltage;
-  float battery_empty_voltage;
-  float battery_critical_voltage;
-  float battery_critical_high_voltage;
-  float charge_current = -1;
-  if (!paramNh.getParam("services/power/battery_full_voltage", battery_full_voltage)) {
-    ROS_ERROR("Need to set param: services/power/battery_full_voltage");
+  auto power_pub = node->create_publisher<mower_msgs::msg::Power>("ll/power", rclcpp::QoS(1));
+  node->declare_parameter<double>("ll.services.power.battery_full_voltage", 0.0);
+  node->declare_parameter<double>("ll.services.power.battery_empty_voltage", 0.0);
+  node->declare_parameter<double>("ll.services.power.battery_critical_voltage", 0.0);
+  node->declare_parameter<double>("ll.services.power.battery_critical_high_voltage", 0.0);
+  node->declare_parameter<double>("ll.services.power.charge_current", -1.0);
+  float battery_full_voltage = static_cast<float>(node->get_parameter("ll.services.power.battery_full_voltage").as_double());
+  float battery_empty_voltage = static_cast<float>(node->get_parameter("ll.services.power.battery_empty_voltage").as_double());
+  float battery_critical_voltage = static_cast<float>(node->get_parameter("ll.services.power.battery_critical_voltage").as_double());
+  float battery_critical_high_voltage = static_cast<float>(node->get_parameter("ll.services.power.battery_critical_high_voltage").as_double());
+  float charge_current = static_cast<float>(node->get_parameter("ll.services.power.charge_current").as_double());
+  if (battery_full_voltage == 0.0f) {
+    RCLCPP_ERROR(node->get_logger(), "Need to set param: ll.services.power.battery_full_voltage");
     return 1;
   }
-  if (!paramNh.getParam("services/power/battery_empty_voltage", battery_empty_voltage)) {
-    ROS_ERROR("Need to set param: services/power/battery_empty_voltage");
+  if (battery_empty_voltage == 0.0f) {
+    RCLCPP_ERROR(node->get_logger(), "Need to set param: ll.services.power.battery_empty_voltage");
     return 1;
   }
-  if (!paramNh.getParam("services/power/battery_critical_voltage", battery_critical_voltage)) {
-    ROS_ERROR("Need to set param: services/power/battery_critical_voltage");
+  if (battery_critical_voltage == 0.0f) {
+    RCLCPP_ERROR(node->get_logger(), "Need to set param: ll.services.power.battery_critical_voltage");
     return 1;
   }
-  if (!paramNh.getParam("services/power/battery_critical_high_voltage", battery_critical_high_voltage)) {
-    ROS_ERROR("Need to set param: services/power/battery_critical_high_voltage");
+  if (battery_critical_high_voltage == 0.0f) {
+    RCLCPP_ERROR(node->get_logger(), "Need to set param: ll.services.power.battery_critical_high_voltage");
     return 1;
   }
-  paramNh.getParam("services/power/charge_current", charge_current);
   power_service = std::make_unique<PowerServiceInterface>(
       xbot::service_ids::POWER, ctx, power_pub, battery_full_voltage, battery_empty_voltage, battery_critical_voltage,
-      battery_critical_high_voltage, charge_current);
+      battery_critical_high_voltage, charge_current, node);
   power_service->Start();
 
   // GPS service
-  double datum_lat, datum_long, datum_height;
-  bool has_datum = true;
-  has_datum &= paramNh.getParam("services/gps/datum_lat", datum_lat);
-  has_datum &= paramNh.getParam("services/gps/datum_long", datum_long);
-  has_datum &= paramNh.getParam("services/gps/datum_height", datum_height);
+  node->declare_parameter<double>("ll.services.gps.datum_lat", 0.0);
+  node->declare_parameter<double>("ll.services.gps.datum_long", 0.0);
+  node->declare_parameter<double>("ll.services.gps.datum_height", 0.0);
+  node->declare_parameter<bool>("ll.services.gps.absolute_coords", true);
+  double datum_lat = node->get_parameter("ll.services.gps.datum_lat").as_double();
+  double datum_long = node->get_parameter("ll.services.gps.datum_long").as_double();
+  double datum_height = node->get_parameter("ll.services.gps.datum_height").as_double();
+  bool has_datum = (datum_lat != 0.0) && (datum_long != 0.0) && (datum_height != 0.0);
   if (!has_datum) {
-    ROS_ERROR_STREAM("You need to provide datum_lat and datum_long and datum_height in order to use the absolute mode");
+    RCLCPP_ERROR(node->get_logger(), "You need to provide datum_lat and datum_long and datum_height in order to use the absolute mode");
     return 2;
   }
-  ROS_INFO_STREAM("Datum: " << datum_lat << ", " << datum_long << ", " << datum_height);
-  gps_position_pub = n.advertise<xbot_msgs::AbsolutePose>("ll/position/gps", 1);
-  nmea_pub = n.advertise<nmea_msgs::Sentence>("ll/position/gps/nmea", 1);
-  bool absolute_coords = true;
-  paramNh.getParam("services/gps/absolute_coords", absolute_coords);
-  gps_service = std::make_unique<GpsServiceInterface>(xbot::service_ids::GPS, ctx, gps_position_pub, nmea_pub,
-                                                      datum_lat, datum_long, datum_height, baud_rate, protocol,
-                                                      gps_port_index, absolute_coords);
+  RCLCPP_INFO(node->get_logger(), "Datum: %.7f, %.7f, %.3f", datum_lat, datum_long, datum_height);
+  auto gps_position_pub = node->create_publisher<xbot_msgs::msg::AbsolutePose>("ll/position/gps", rclcpp::QoS(1));
+  auto nmea_pub = node->create_publisher<nmea_msgs::msg::Sentence>("ll/position/gps/nmea", rclcpp::QoS(1));
+  bool absolute_coords = node->get_parameter("ll.services.gps.absolute_coords").as_bool();
+  gps_service = std::make_unique<GpsServiceInterface>(
+      xbot::service_ids::GPS, ctx, gps_position_pub, nmea_pub,
+      datum_lat, datum_long, datum_height,
+      static_cast<uint32_t>(baud_rate), protocol, static_cast<uint8_t>(gps_port_index),
+      absolute_coords, node);
   gps_service->Start();
 
-  ros::spin();
-
+  rclcpp::spin(node);
+  rclcpp::shutdown();
   return 0;
 }

@@ -1,5 +1,6 @@
 <?xml version="1.0"?>
-<package format="2">
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
   <name>open_mower</name>
   <version>0.0.0</version>
   <description>The open_mower package</description>
@@ -9,23 +10,15 @@
 
   <url type="website">https://github.com/ClemensElflein/OpenMower</url>
 
-  <buildtool_depend>catkin</buildtool_depend>
-  <build_depend>mower_msgs</build_depend>
-  <build_depend>mower_simulation</build_depend>
-  <build_depend>mower_map</build_depend>
-  <build_depend>twist_mux_msgs</build_depend>
-  <build_depend>rtcm_msgs</build_depend>
+  <buildtool_depend>ament_cmake</buildtool_depend>
 
-  <build_export_depend>mower_msgs</build_export_depend>
-  <build_export_depend>mower_simulation</build_export_depend>
-  <build_export_depend>mower_map</build_export_depend>
+  <depend>mower_msgs</depend>
+  <depend>mower_simulation</depend>
+  <depend>mower_map</depend>
 
-  <exec_depend>mower_msgs</exec_depend>
-  <exec_depend>mower_simulation</exec_depend>
-  <exec_depend>joy</exec_depend>
+  <exec_depend>joy_linux</exec_depend>
   <exec_depend>joy_teleop</exec_depend>
   <exec_depend>teleop_twist_joy</exec_depend>
-  <exec_depend>mower_map</exec_depend>
   <exec_depend>mbf_costmap_nav</exec_depend>
   <exec_depend>ftc_local_planner</exec_depend>
   <exec_depend>global_planner</exec_depend>
@@ -34,12 +27,13 @@
   <exec_depend>imu_filter_madgwick</exec_depend>
   <exec_depend>twist_mux</exec_depend>
   <exec_depend>rtcm_msgs</exec_depend>
-  <exec_depend>rosbag_snapshot</exec_depend>
+  <exec_depend>ntrip_client</exec_depend>
+  <exec_depend>twist_mux_msgs</exec_depend>
 
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
 
-  <!-- The export tag contains other, unspecified, tags -->
   <export>
-    <!-- Other tools can request additional information be placed here -->
-
+    <build_type>ament_cmake</build_type>
   </export>
 </package>

@@ -4,31 +4,32 @@
 //
 #include <filesystem>
 
-#include "ros/ros.h"
+#include <rclcpp/rclcpp.hpp>
 #include <memory>
-#include <boost/regex.hpp>
-#include "xbot_msgs/SensorInfo.h"
-#include "xbot_msgs/SensorDataString.h"
-#include "xbot_msgs/SensorDataDouble.h"
-#include "xbot_msgs/RobotState.h"
+#include <regex>
+#include "xbot_msgs/msg/sensor_info.hpp"
+#include "xbot_msgs/msg/sensor_data_string.hpp"
+#include "xbot_msgs/msg/sensor_data_double.hpp"
+#include "xbot_msgs/msg/robot_state.hpp"
 #include <mqtt/async_client.h>
 #include <nlohmann/json.hpp>
 #include <vector>
-#include "geometry_msgs/Twist.h"
-#include "std_msgs/String.h"
-#include "xbot_msgs/RegisterActionsSrv.h"
-#include "xbot_msgs/ActionInfo.h"
-#include "xbot_msgs/MapOverlay.h"
-#include "xbot_rpc/RpcError.h"
-#include "xbot_rpc/RpcRequest.h"
-#include "xbot_rpc/RpcResponse.h"
+#include "geometry_msgs/msg/twist.hpp"
+#include "std_msgs/msg/string.hpp"
+#include "xbot_msgs/srv/register_actions_srv.hpp"
+#include "xbot_msgs/msg/action_info.hpp"
+#include "xbot_msgs/msg/map_overlay.hpp"
+#include "xbot_rpc/msg/rpc_error.hpp"
+#include "xbot_rpc/msg/rpc_request.hpp"
+#include "xbot_rpc/msg/rpc_response.hpp"
 #include "xbot_rpc/constants.h"
 #include "xbot_rpc/provider.h"
-#include "xbot_rpc/RegisterMethodsSrv.h"
+#include "xbot_rpc/srv/register_methods_srv.hpp"
 #include "capabilities.h"
 
 using json = nlohmann::ordered_json;
 
+// Forward declarations
 void publish_capabilities();
 void publish_sensor_metadata();
 void publish_map();
@@ -39,18 +40,18 @@ void publish_params();
 void rpc_request_callback(const std::string &payload);
 
 // Stores registered actions (prefix to vector<action>)
-std::map<std::string, std::vector<xbot_msgs::ActionInfo>> registered_actions;
+std::map<std::string, std::vector<xbot_msgs::msg::ActionInfo>> registered_actions;
 
 // Stores registered RPC methods
 std::map<std::string, std::vector<std::string>> registered_methods;
 std::mutex registered_methods_mutex;
 
 // Maps a topic to a subscriber.
-std::map<std::string, ros::Subscriber> active_subscribers;
-std::map<std::string, xbot_msgs::SensorInfo> found_sensors;
-std::vector<ros::Subscriber> sensor_data_subscribers;
+std::map<std::string, rclcpp::SubscriptionBase::SharedPtr> active_subscribers;
+std::map<std::string, xbot_msgs::msg::SensorInfo> found_sensors;
+std::vector<rclcpp::SubscriptionBase::SharedPtr> sensor_data_subscribers;
 
-ros::NodeHandle *n;
+rclcpp::Node::SharedPtr node;
 
 // The MQTT Client
 std::shared_ptr<mqtt::async_client> client_;
@@ -59,9 +60,9 @@ std::shared_ptr<mqtt::async_client> client_external_;
 std::mutex mqtt_callback_mutex;
 
 // Publisher for cmd_vel and commands
-ros::Publisher cmd_vel_pub;
-ros::Publisher action_pub;
-ros::Publisher rpc_request_pub;
+rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_pub;
+rclcpp::Publisher<std_msgs::msg::String>::SharedPtr action_pub;
+rclcpp::Publisher<xbot_rpc::msg::RpcRequest>::SharedPtr rpc_request_pub;
 
 // properties for external mqtt
 bool external_mqtt_enable = false;
@@ -75,7 +76,7 @@ std::string version_string = "";
 class MqttCallback : public mqtt::callback {
 
     void connected(const mqtt::string &string) override {
-        ROS_INFO_STREAM("MQTT Connected");
+        RCLCPP_INFO(node->get_logger(), "MQTT Connected");
         publish_capabilities();
         publish_sensor_metadata();
         publish_map();
@@ -106,24 +107,24 @@ public:
         if(ptr->get_topic() == this->mqtt_topic_prefix + "teleop") {
             try {
                 json json = json::from_bson(ptr->get_payload().begin(), ptr->get_payload().end());
-                geometry_msgs::Twist t;
+                geometry_msgs::msg::Twist t;
                 t.linear.x = json["vx"];
                 t.angular.z = json["vz"];
-                cmd_vel_pub.publish(t);
+                cmd_vel_pub->publish(t);
             } catch (const json::exception &e) {
-                ROS_ERROR_STREAM("Error decoding teleop bson: " << e.what());
+                RCLCPP_ERROR(node->get_logger(), "Error decoding teleop bson: %s", e.what());
             }
         } else if(ptr->get_topic() == this->mqtt_topic_prefix + "action") {
-            ROS_INFO_STREAM("Got action: " + ptr->get_payload());
-            std_msgs::String action_msg;
+            RCLCPP_INFO(node->get_logger(), "Got action: %s", ptr->get_payload().c_str());
+            std_msgs::msg::String action_msg;
             action_msg.data = ptr->get_payload_str();
-            action_pub.publish(action_msg);
+            action_pub->publish(action_msg);
         } else if(ptr->get_topic() == this->mqtt_topic_prefix + "/action") {
             // BEGIN: Deprecated code (2/2)
-            ROS_WARN_STREAM("Got action on deprecated topic! Change your topic names!: " + ptr->get_payload());
-            std_msgs::String action_msg;
+            RCLCPP_WARN(node->get_logger(), "Got action on deprecated topic! Change your topic names!: %s", ptr->get_payload().c_str());
+            std_msgs::msg::String action_msg;
             action_msg.data = ptr->get_payload_str();
-            action_pub.publish(action_msg);
+            action_pub->publish(action_msg);
             // END: Deprecated code (2/2)
         } else if (ptr->get_topic() == this->mqtt_topic_prefix + "rpc/request") {
           std::string payload = ptr->get_payload_str();
@@ -138,27 +139,13 @@ private:
 MqttCallback mqtt_callback;
 MqttCallback mqtt_callback_external;
 
-json map;
-json map_overlay;
+json map_json;
+json map_overlay_json;
 bool has_map = false;
 bool has_map_overlay = false;
 
-xbot_rpc::RpcProvider rpc_provider("xbot_monitoring", {{
-    RPC_METHOD("rpc.ping", {
-        return "pong";
-    }),
-    RPC_METHOD("rpc.methods", {
-        std::lock_guard<std::mutex> lk(registered_methods_mutex);
-        json methods = json::array();
-        for (const auto& [_, method_ids] : registered_methods) {
-            for (const auto& method_id : method_ids) {
-                methods.push_back(method_id);
-            }
-        }
-        std::sort(methods.begin(), methods.end());
-        return methods;
-    }),
-}});
+// RPC provider will be initialized in main after node creation
+std::unique_ptr<xbot_rpc::RpcProvider> rpc_provider;
 
 void setupMqttClient() {
     // setup mqtt client for app use
@@ -185,7 +172,7 @@ void setupMqttClient() {
             client_->connect(connect_options_);
 
         } catch (const mqtt::exception &e) {
-            ROS_ERROR("Client could not be initialized: %s", e.what());
+            RCLCPP_ERROR(node->get_logger(), "Client could not be initialized: %s", e.what());
             exit(EXIT_FAILURE);
         }
     }
@@ -218,7 +205,7 @@ void setupMqttClient() {
             client_external_->connect(connect_options_);
 
         } catch (const mqtt::exception &e) {
-            ROS_ERROR("External Client could not be initialized: %s", e.what());
+            RCLCPP_ERROR(node->get_logger(), "External Client could not be initialized: %s", e.what());
             exit(EXIT_FAILURE);
         }
     }
@@ -276,62 +263,11 @@ void publish_capabilities() {
   try_publish("capabilities/json", CAPABILITIES.dump(2), true);
 }
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic warning "-Wswitch-enum"
-json xmlrpc_to_json(XmlRpc::XmlRpcValue value) {
-    switch (value.getType()) {
-        case XmlRpc::XmlRpcValue::TypeBoolean:
-            return static_cast<bool>(value);
-        case XmlRpc::XmlRpcValue::TypeInt:
-            return static_cast<int>(value);
-        case XmlRpc::XmlRpcValue::TypeDouble:
-            return static_cast<double>(value);
-        case XmlRpc::XmlRpcValue::TypeString:
-            return static_cast<std::string>(value);
-        case XmlRpc::XmlRpcValue::TypeArray: {
-            json arr = json::array();
-            for (int i = 0; i < value.size(); ++i)
-                arr.push_back(xmlrpc_to_json(value[i]));
-            return arr;
-        }
-        case XmlRpc::XmlRpcValue::TypeStruct: {
-            json obj = json::object();
-            for (auto it = value.begin(); it != value.end(); ++it)
-                obj[it->first] = xmlrpc_to_json(it->second);
-            return obj;
-        }
-        case XmlRpc::XmlRpcValue::TypeDateTime: {
-            const struct tm& t = static_cast<const struct tm&>(value);
-            char buf[32];
-            std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S", &t);
-            return std::string(buf);
-        }
-        case XmlRpc::XmlRpcValue::TypeBase64: {
-            const XmlRpc::XmlRpcValue::BinaryData& data = static_cast<const XmlRpc::XmlRpcValue::BinaryData&>(value);
-            static const char* b64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-            std::string out;
-            out.reserve(((data.size() + 2) / 3) * 4);
-            for (size_t i = 0; i < data.size(); i += 3) {
-                unsigned int n = (static_cast<unsigned char>(data[i]) << 16)
-                    | (i + 1 < data.size() ? static_cast<unsigned char>(data[i + 1]) << 8 : 0)
-                    | (i + 2 < data.size() ? static_cast<unsigned char>(data[i + 2]) : 0);
-                out += b64[(n >> 18) & 0x3F];
-                out += b64[(n >> 12) & 0x3F];
-                out += (i + 1 < data.size()) ? b64[(n >> 6) & 0x3F] : '=';
-                out += (i + 2 < data.size()) ? b64[n & 0x3F] : '=';
-            }
-            return out;
-        }
-        case XmlRpc::XmlRpcValue::TypeInvalid:
-            return nullptr;
-    }
-    return nullptr;
-}
-#pragma GCC diagnostic pop
-
+// In ROS2 there is no XmlRpc parameter server. Parameters are node-local.
+// We publish all declared parameters as JSON.
 void publish_params() {
-    std::vector<std::string> param_names;
-    ros::param::getParamNames(param_names);
+    // Get all parameter names from this node
+    auto param_names = node->list_parameters({}, 0).names;
     std::sort(param_names.begin(), param_names.end());
 
     json params = json::object();
@@ -340,9 +276,67 @@ void publish_params() {
             params[name] = nullptr;
             continue;
         }
-        XmlRpc::XmlRpcValue value;
-        if (ros::param::get(name, value)) {
-            params[name] = xmlrpc_to_json(value);
+        rclcpp::Parameter param;
+        if (node->get_parameter(name, param)) {
+            switch (param.get_type()) {
+                case rclcpp::ParameterType::PARAMETER_BOOL:
+                    params[name] = param.as_bool();
+                    break;
+                case rclcpp::ParameterType::PARAMETER_INTEGER:
+                    params[name] = param.as_int();
+                    break;
+                case rclcpp::ParameterType::PARAMETER_DOUBLE:
+                    params[name] = param.as_double();
+                    break;
+                case rclcpp::ParameterType::PARAMETER_STRING:
+                    params[name] = param.as_string();
+                    break;
+                case rclcpp::ParameterType::PARAMETER_BOOL_ARRAY: {
+                    json arr = json::array();
+                    for (auto v : param.as_bool_array()) arr.push_back(v);
+                    params[name] = arr;
+                    break;
+                }
+                case rclcpp::ParameterType::PARAMETER_INTEGER_ARRAY: {
+                    json arr = json::array();
+                    for (auto v : param.as_integer_array()) arr.push_back(v);
+                    params[name] = arr;
+                    break;
+                }
+                case rclcpp::ParameterType::PARAMETER_DOUBLE_ARRAY: {
+                    json arr = json::array();
+                    for (auto v : param.as_double_array()) arr.push_back(v);
+                    params[name] = arr;
+                    break;
+                }
+                case rclcpp::ParameterType::PARAMETER_STRING_ARRAY: {
+                    json arr = json::array();
+                    for (const auto &v : param.as_string_array()) arr.push_back(v);
+                    params[name] = arr;
+                    break;
+                }
+                case rclcpp::ParameterType::PARAMETER_BYTE_ARRAY: {
+                    // Encode as base64
+                    const auto& data = param.as_byte_array();
+                    static const char* b64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+                    std::string out;
+                    out.reserve(((data.size() + 2) / 3) * 4);
+                    for (size_t i = 0; i < data.size(); i += 3) {
+                        unsigned int n = (static_cast<unsigned char>(data[i]) << 16)
+                            | (i + 1 < data.size() ? static_cast<unsigned char>(data[i + 1]) << 8 : 0)
+                            | (i + 2 < data.size() ? static_cast<unsigned char>(data[i + 2]) : 0);
+                        out += b64[(n >> 18) & 0x3F];
+                        out += b64[(n >> 12) & 0x3F];
+                        out += (i + 1 < data.size()) ? b64[(n >> 6) & 0x3F] : '=';
+                        out += (i + 2 < data.size()) ? b64[n & 0x3F] : '=';
+                    }
+                    params[name] = out;
+                    break;
+                }
+                default:
+                    params[name] = nullptr;
+                    break;
+            }
         }
     }
     try_publish("params/json", params.dump(), true);
@@ -361,11 +355,11 @@ void publish_sensor_metadata() {
         info["sensor_name"] = kv.second.sensor_name;
 
         switch (kv.second.value_type) {
-            case xbot_msgs::SensorInfo::TYPE_STRING: {
+            case xbot_msgs::msg::SensorInfo::TYPE_STRING: {
                 info["value_type"] = "STRING";
                 break;
             }
-            case xbot_msgs::SensorInfo::TYPE_DOUBLE: {
+            case xbot_msgs::msg::SensorInfo::TYPE_DOUBLE: {
                 info["value_type"] = "DOUBLE";
                 break;
             }
@@ -378,31 +372,31 @@ void publish_sensor_metadata() {
         }
 
         switch (kv.second.value_description) {
-            case xbot_msgs::SensorInfo::VALUE_DESCRIPTION_TEMPERATURE: {
+            case xbot_msgs::msg::SensorInfo::VALUE_DESCRIPTION_TEMPERATURE: {
                 info["value_description"] = "TEMPERATURE";
                 break;
             }
-            case xbot_msgs::SensorInfo::VALUE_DESCRIPTION_VELOCITY: {
+            case xbot_msgs::msg::SensorInfo::VALUE_DESCRIPTION_VELOCITY: {
                 info["value_description"] = "VELOCITY";
                 break;
             }
-            case xbot_msgs::SensorInfo::VALUE_DESCRIPTION_ACCELERATION: {
+            case xbot_msgs::msg::SensorInfo::VALUE_DESCRIPTION_ACCELERATION: {
                 info["value_description"] = "ACCELERATION";
                 break;
             }
-            case xbot_msgs::SensorInfo::VALUE_DESCRIPTION_VOLTAGE: {
+            case xbot_msgs::msg::SensorInfo::VALUE_DESCRIPTION_VOLTAGE: {
                 info["value_description"] = "VOLTAGE";
                 break;
             }
-            case xbot_msgs::SensorInfo::VALUE_DESCRIPTION_CURRENT: {
+            case xbot_msgs::msg::SensorInfo::VALUE_DESCRIPTION_CURRENT: {
                 info["value_description"] = "CURRENT";
                 break;
             }
-            case xbot_msgs::SensorInfo::VALUE_DESCRIPTION_PERCENT: {
+            case xbot_msgs::msg::SensorInfo::VALUE_DESCRIPTION_PERCENT: {
                 info["value_description"] = "PERCENT";
                 break;
             }
-            case xbot_msgs::SensorInfo::VALUE_DESCRIPTION_RPM: {
+            case xbot_msgs::msg::SensorInfo::VALUE_DESCRIPTION_RPM: {
                 info["value_description"] = "REVOLUTIONS";
                 break;
             }
@@ -432,14 +426,14 @@ void publish_sensor_metadata() {
 void subscribe_to_sensor(std::string topic) {
     auto &sensor = found_sensors[topic];
 
-    ROS_INFO_STREAM("Subscribing to sensor data for sensor with name: " << sensor.sensor_name);
+    RCLCPP_INFO(node->get_logger(), "Subscribing to sensor data for sensor with name: %s", sensor.sensor_name.c_str());
 
     std::string data_topic = "xbot_monitoring/sensors/" + sensor.sensor_id + "/data";
 
     switch (sensor.value_type) {
-        case xbot_msgs::SensorInfo::TYPE_DOUBLE: {
-            ros::Subscriber s = n->subscribe<xbot_msgs::SensorDataDouble>(data_topic, 10, [&info = sensor](
-                    const xbot_msgs::SensorDataDouble::ConstPtr &msg) {
+        case xbot_msgs::msg::SensorInfo::TYPE_DOUBLE: {
+            auto s = node->create_subscription<xbot_msgs::msg::SensorDataDouble>(data_topic, 10, [&info = sensor](
+                    const xbot_msgs::msg::SensorDataDouble::SharedPtr msg) {
                 try_publish("sensors/" + info.sensor_id + "/data", std::to_string(msg->data));
 
                 json data;
@@ -450,9 +444,9 @@ void subscribe_to_sensor(std::string topic) {
             sensor_data_subscribers.push_back(s);
             break;
         }
-        case xbot_msgs::SensorInfo::TYPE_STRING: {
-            ros::Subscriber s = n->subscribe<xbot_msgs::SensorDataString>(data_topic, 10, [&info = sensor](
-                    const xbot_msgs::SensorDataString::ConstPtr &msg) {
+        case xbot_msgs::msg::SensorInfo::TYPE_STRING: {
+            auto s = node->create_subscription<xbot_msgs::msg::SensorDataString>(data_topic, 10, [&info = sensor](
+                    const xbot_msgs::msg::SensorDataString::SharedPtr msg) {
                 try_publish("sensors/" + info.sensor_id + "/data", msg->data);
 
                 json data;
@@ -464,12 +458,12 @@ void subscribe_to_sensor(std::string topic) {
             break;
         }
         default: {
-            ROS_ERROR_STREAM("Invalid Sensor Data Type: " << (int) sensor.value_type);
+            RCLCPP_ERROR(node->get_logger(), "Invalid Sensor Data Type: %d", (int) sensor.value_type);
         }
     }
 }
 
-void robot_state_callback(const xbot_msgs::RobotState::ConstPtr &msg) {
+void robot_state_callback(const xbot_msgs::msg::RobotState::SharedPtr msg) {
     // Build a JSON and publish it
     json j;
 
@@ -521,9 +515,9 @@ void publish_actions() {
 void publish_map() {
     if(!has_map)
         return;
-    try_publish("map/json", map.dump(2), true);
+    try_publish("map/json", map_json.dump(2), true);
     json data;
-    data["d"] = map;
+    data["d"] = map_json;
     auto bson = json::to_bson(data);
     try_publish_binary("map/bson", bson.data(), bson.size(), true);
 }
@@ -531,25 +525,25 @@ void publish_map() {
 void publish_map_overlay() {
     if(!has_map_overlay)
         return;
-    try_publish("map_overlay/json", map_overlay.dump(), true);
+    try_publish("map_overlay/json", map_overlay_json.dump(), true);
     json data;
-    data["d"] = map_overlay;
+    data["d"] = map_overlay_json;
     auto bson = json::to_bson(data);
     try_publish_binary("map_overlay/bson", bson.data(), bson.size(), true);
 }
 
-void map_callback(const std_msgs::String::ConstPtr &msg) {
+void map_callback(const std_msgs::msg::String::SharedPtr msg) {
     try {
-        map = json::parse(msg->data);
+        map_json = json::parse(msg->data);
         has_map = true;
         publish_map();
     } catch (const json::exception &e) {
-        ROS_ERROR_STREAM("Error processing map JSON: " << e.what());
+        RCLCPP_ERROR(node->get_logger(), "Error processing map JSON: %s", e.what());
     }
 }
 
 
-void map_overlay_callback(const xbot_msgs::MapOverlay::ConstPtr &msg) {
+void map_overlay_callback(const xbot_msgs::msg::MapOverlay::SharedPtr msg) {
     // Build a JSON and publish it
 
     json polys;
@@ -575,21 +569,22 @@ void map_overlay_callback(const xbot_msgs::MapOverlay::ConstPtr &msg) {
 
     json j;
     j["polygons"] = polys;
-    map_overlay = j;
+    map_overlay_json = j;
     has_map_overlay = true;
 
     publish_map_overlay();
 }
 
 
-bool registerActions(xbot_msgs::RegisterActionsSrvRequest &req, xbot_msgs::RegisterActionsSrvResponse &res) {
+void registerActions(const std::shared_ptr<xbot_msgs::srv::RegisterActionsSrv::Request> req,
+                     std::shared_ptr<xbot_msgs::srv::RegisterActionsSrv::Response> res) {
 
-    ROS_INFO_STREAM("new actions registered: " << req.node_prefix << " registered " << req.actions.size() << " actions.");
+    RCLCPP_INFO(node->get_logger(), "new actions registered: %s registered %zu actions.",
+                req->node_prefix.c_str(), req->actions.size());
 
-    registered_actions[req.node_prefix] = req.actions;
+    registered_actions[req->node_prefix] = req->actions;
 
     publish_actions();
-    return true;
 }
 
 void rpc_publish_error(const int16_t code, const std::string &message, const nlohmann::basic_json<> &id = nullptr) {
@@ -605,20 +600,20 @@ void rpc_request_callback(const std::string &payload) {
     try {
       req = json::parse(payload);
     } catch (const json::parse_error &e) {
-      return rpc_publish_error(xbot_rpc::RpcError::ERROR_INVALID_JSON, "Could not parse request JSON");
+      return rpc_publish_error(xbot_rpc::msg::RpcError::ERROR_INVALID_JSON, "Could not parse request JSON");
     }
 
     // Validate
     if (!req.is_object()) {
-        return rpc_publish_error(xbot_rpc::RpcError::ERROR_INVALID_REQUEST, "Request is not a JSON object");
+        return rpc_publish_error(xbot_rpc::msg::RpcError::ERROR_INVALID_REQUEST, "Request is not a JSON object");
     }
     json id = req.contains("id") ? req["id"] : nullptr;
     if (id != nullptr && !id.is_string()) {
-        return rpc_publish_error(xbot_rpc::RpcError::ERROR_INVALID_REQUEST, "ID is not a string", id);
+        return rpc_publish_error(xbot_rpc::msg::RpcError::ERROR_INVALID_REQUEST, "ID is not a string", id);
     } else if (!req.contains("jsonrpc") || !req["jsonrpc"].is_string() || req["jsonrpc"] != "2.0") {
-        return rpc_publish_error(xbot_rpc::RpcError::ERROR_INVALID_REQUEST, "Invalid JSON-RPC version");
+        return rpc_publish_error(xbot_rpc::msg::RpcError::ERROR_INVALID_REQUEST, "Invalid JSON-RPC version");
     } else if (!req.contains("method") || !req["method"].is_string()) {
-        return rpc_publish_error(xbot_rpc::RpcError::ERROR_INVALID_REQUEST, "Method is not a string", req["id"]);
+        return rpc_publish_error(xbot_rpc::msg::RpcError::ERROR_INVALID_REQUEST, "Method is not a string", req["id"]);
     }
 
     // Check if the method is registered
@@ -638,136 +633,172 @@ void rpc_request_callback(const std::string &payload) {
         }
     }
     if (!is_registered) {
-        return rpc_publish_error(xbot_rpc::RpcError::ERROR_METHOD_NOT_FOUND, "Method \"" + method + "\" not found", req["id"]);
+        return rpc_publish_error(xbot_rpc::msg::RpcError::ERROR_METHOD_NOT_FOUND, "Method \"" + method + "\" not found", req["id"]);
     }
 
     // Forward to the providers as ROS message
-    xbot_rpc::RpcRequest msg;
+    xbot_rpc::msg::RpcRequest msg;
     msg.method = method;
     msg.params = req.contains("params") ? req["params"].dump() : "";
     msg.id = id != nullptr ? id : "";
-    rpc_request_pub.publish(msg);
+    rpc_request_pub->publish(msg);
 }
 
-void rpc_response_callback(const xbot_rpc::RpcResponse::ConstPtr &msg) {
+void rpc_response_callback(const xbot_rpc::msg::RpcResponse::SharedPtr msg) {
     json result;
     try {
         result = json::parse(msg->result);
     } catch (const json::parse_error &e) {
-        return rpc_publish_error(xbot_rpc::RpcError::ERROR_INTERNAL, "Internal error while parsing result JSON: " + std::string(e.what()), msg->id);
+        return rpc_publish_error(xbot_rpc::msg::RpcError::ERROR_INTERNAL, "Internal error while parsing result JSON: " + std::string(e.what()), msg->id);
     }
 
     json j = {{"jsonrpc", "2.0"}, {"result", result}, {"id", msg->id}};
     try_publish("rpc/response", j.dump(2));
 }
 
-void rpc_error_callback(const xbot_rpc::RpcError::ConstPtr &msg) {
+void rpc_error_callback(const xbot_rpc::msg::RpcError::SharedPtr msg) {
     rpc_publish_error(msg->code, msg->message, msg->id);
 }
 
-bool register_methods(xbot_rpc::RegisterMethodsSrvRequest &req, xbot_rpc::RegisterMethodsSrvResponse &res) {
+void register_methods(const std::shared_ptr<xbot_rpc::srv::RegisterMethodsSrv::Request> req,
+                      std::shared_ptr<xbot_rpc::srv::RegisterMethodsSrv::Response> res) {
     std::lock_guard<std::mutex> lk(registered_methods_mutex);
-    registered_methods[req.node_id] = req.methods;
-    ROS_INFO_STREAM("new methods registered: " << req.node_id << " registered " << req.methods.size() << " methods.");
-    return true;
+    registered_methods[req->node_id] = req->methods;
+    RCLCPP_INFO(node->get_logger(), "new methods registered: %s registered %zu methods.",
+                req->node_id.c_str(), req->methods.size());
 }
 
 int main(int argc, char **argv) {
-    ros::init(argc, argv, "xbot_monitoring");
+    rclcpp::init(argc, argv);
     has_map = false;
     has_map_overlay = false;
 
+    node = std::make_shared<rclcpp::Node>("xbot_monitoring");
 
-    n = new ros::NodeHandle();
-    ros::NodeHandle paramNh("~");
+    node->declare_parameter<std::string>("software_version", "UNKNOWN VERSION");
+    node->declare_parameter<bool>("external_mqtt_enable", false);
+    node->declare_parameter<std::string>("external_mqtt_topic_prefix", "");
+    node->declare_parameter<std::string>("external_mqtt_hostname", "");
+    node->declare_parameter<int>("external_mqtt_port", 1883);
+    node->declare_parameter<std::string>("external_mqtt_username", "");
+    node->declare_parameter<std::string>("external_mqtt_password", "");
 
-    version_string = paramNh.param("software_version", std::string("UNKNOWN VERSION"));
+    version_string = node->get_parameter("software_version").as_string();
     if(version_string.empty()) {
         version_string = "UNKNOWN VERSION";
     }
 
-    external_mqtt_enable = paramNh.param("external_mqtt_enable", false);
-    external_mqtt_topic_prefix = paramNh.param("external_mqtt_topic_prefix", std::string(""));
+    external_mqtt_enable = node->get_parameter("external_mqtt_enable").as_bool();
+    external_mqtt_topic_prefix = node->get_parameter("external_mqtt_topic_prefix").as_string();
     if(!external_mqtt_topic_prefix.empty() && external_mqtt_topic_prefix.back() != '/') {
         // append the /
         external_mqtt_topic_prefix = external_mqtt_topic_prefix+"/";
     }
 
-    external_mqtt_hostname = paramNh.param("external_mqtt_hostname", std::string(""));
-    external_mqtt_port = std::to_string(paramNh.param("external_mqtt_port", 1883));
-    external_mqtt_username = paramNh.param("external_mqtt_username", std::string(""));
-    external_mqtt_password = paramNh.param("external_mqtt_password", std::string(""));
+    external_mqtt_hostname = node->get_parameter("external_mqtt_hostname").as_string();
+    external_mqtt_port = std::to_string(node->get_parameter("external_mqtt_port").as_int());
+    external_mqtt_username = node->get_parameter("external_mqtt_username").as_string();
+    external_mqtt_password = node->get_parameter("external_mqtt_password").as_string();
 
     if(external_mqtt_enable) {
-        ROS_INFO_STREAM("Using external MQTT broker: " << external_mqtt_hostname << ":" << external_mqtt_port << " with topic prefix: " + external_mqtt_topic_prefix);
+        RCLCPP_INFO(node->get_logger(), "Using external MQTT broker: %s:%s with topic prefix: %s",
+                    external_mqtt_hostname.c_str(), external_mqtt_port.c_str(), external_mqtt_topic_prefix.c_str());
     }
 
     // First setup MQTT
     setupMqttClient();
 
-    ros::ServiceServer register_action_service = n->advertiseService("xbot/register_actions", registerActions);
+    auto register_action_service = node->create_service<xbot_msgs::srv::RegisterActionsSrv>(
+        "xbot/register_actions", registerActions);
 
-    ros::Subscriber robotStateSubscriber = n->subscribe("xbot_monitoring/robot_state", 10, robot_state_callback);
-    ros::Subscriber mapSubscriber = n->subscribe("mower_map_service/json_map", 10, map_callback);
-    ros::Subscriber mapOverlaySubscriber = n->subscribe("xbot_monitoring/map_overlay", 10, map_overlay_callback);
+    auto robotStateSubscriber = node->create_subscription<xbot_msgs::msg::RobotState>(
+        "xbot_monitoring/robot_state", 10, robot_state_callback);
+    auto mapSubscriber = node->create_subscription<std_msgs::msg::String>(
+        "mower_map_service/json_map", 10, map_callback);
+    auto mapOverlaySubscriber = node->create_subscription<xbot_msgs::msg::MapOverlay>(
+        "xbot_monitoring/map_overlay", 10, map_overlay_callback);
 
-    cmd_vel_pub = n->advertise<geometry_msgs::Twist>("xbot_monitoring/remote_cmd_vel", 1);
-    action_pub = n->advertise<std_msgs::String>("xbot/action", 1);
+    cmd_vel_pub = node->create_publisher<geometry_msgs::msg::Twist>("xbot_monitoring/remote_cmd_vel", 1);
+    action_pub = node->create_publisher<std_msgs::msg::String>("xbot/action", 1);
 
-    rpc_request_pub = n->advertise<xbot_rpc::RpcRequest>(xbot_rpc::TOPIC_REQUEST, 100);
-    ros::Subscriber rpc_response_sub = n->subscribe(xbot_rpc::TOPIC_RESPONSE, 100, rpc_response_callback);
-    ros::Subscriber rpc_error_sub = n->subscribe(xbot_rpc::TOPIC_ERROR, 100, rpc_error_callback);
-    ros::ServiceServer register_methods_service = n->advertiseService(xbot_rpc::SERVICE_REGISTER_METHODS, register_methods);
+    rpc_request_pub = node->create_publisher<xbot_rpc::msg::RpcRequest>(xbot_rpc::TOPIC_REQUEST, 100);
+    auto rpc_response_sub = node->create_subscription<xbot_rpc::msg::RpcResponse>(
+        xbot_rpc::TOPIC_RESPONSE, 100, rpc_response_callback);
+    auto rpc_error_sub = node->create_subscription<xbot_rpc::msg::RpcError>(
+        xbot_rpc::TOPIC_ERROR, 100, rpc_error_callback);
+    auto register_methods_service = node->create_service<xbot_rpc::srv::RegisterMethodsSrv>(
+        xbot_rpc::SERVICE_REGISTER_METHODS, register_methods);
 
-    ros::AsyncSpinner spinner(1);
-    spinner.start();
-
-    rpc_provider.init();
-
-    ros::Rate sensor_check_rate(10.0);
-
-    boost::regex topic_regex("/xbot_monitoring/sensors/.*/info");
-
-    while (ros::ok()) {
-        // Read the topics in /xbot_monitoring/sensors/.*/info and subscribe to them.
-        ros::master::V_TopicInfo topics;
-        ros::master::getTopics(topics);
-        std::for_each(topics.begin(), topics.end(), [&](const ros::master::TopicInfo &item) {
-
-            if (!boost::regex_match(item.name, topic_regex) || active_subscribers.count(item.name) != 0)
-                return;
-
-            ROS_INFO_STREAM("Found new sensor topic " << item.name);
-            active_subscribers[item.name] = n->subscribe<xbot_msgs::SensorInfo>(
-                item.name, 1, [topic = item.name](const xbot_msgs::SensorInfo::ConstPtr &msg) {
-                    ROS_INFO_STREAM("Got sensor info for sensor on topic " << msg->sensor_name << " on topic " << topic);
-                    auto exist = found_sensors.count(topic);
-
-                    // Sensor already known and sensor-info equals?
-                    if(exist != 0 && found_sensors[topic] == *msg)
-                        return;
-
-                    {
-                        // Sensor is new or sensor-info differ from the buffered one
-                        std::unique_lock<std::mutex> lk(mqtt_callback_mutex);
-                        found_sensors[topic] = *msg;  // Save the (new|changed) sensor info
-                    }
-
-                    // Let the info subscription alive for dynamic threshold changes
-                    //active_subscribers.erase(topic);  // Stop subscribing to infos
-
-                    if (exist == 0) {
-                        subscribe_to_sensor(topic);  // Subscribe for data
-                    }
-
-                    // Republish (new|changed) sensor info
-                    // NOTE: If a sensor name or id changes, the related data topic wouldn't change!
-                    //       But do we dynamically change a sensor name or id?
-                    publish_sensor_metadata();
+    // Create RPC provider (needs node to be created first)
+    rpc_provider = std::make_unique<xbot_rpc::RpcProvider>(node, "xbot_monitoring", std::map<std::string, xbot_rpc::callback_t>{
+        RPC_METHOD("rpc.ping", {
+            return "pong";
+        }),
+        RPC_METHOD("rpc.methods", {
+            std::lock_guard<std::mutex> lk(registered_methods_mutex);
+            json methods = json::array();
+            for (const auto& [_, method_ids] : registered_methods) {
+                for (const auto& method_id : method_ids) {
+                    methods.push_back(method_id);
                 }
-            );
-        });
-        sensor_check_rate.sleep();
-    }
+            }
+            std::sort(methods.begin(), methods.end());
+            return methods;
+        }),
+    });
+    rpc_provider->init();
+
+    // Use a multi-threaded executor to allow callbacks while the timer runs
+    rclcpp::executors::MultiThreadedExecutor executor;
+    executor.add_node(node);
+
+    std::regex topic_regex("/xbot_monitoring/sensors/.*/info");
+
+    // Create a wall timer to periodically check for new sensor topics (replaces the ROS1 loop)
+    auto sensor_check_timer = node->create_wall_timer(
+        std::chrono::milliseconds(100),
+        [&topic_regex]() {
+            // In ROS2, use the node's graph interface to discover topics
+            auto topic_names_and_types = node->get_topic_names_and_types();
+            for (const auto& [topic_name, types] : topic_names_and_types) {
+                if (!std::regex_match(topic_name, topic_regex) || active_subscribers.count(topic_name) != 0)
+                    continue;
+
+                RCLCPP_INFO(node->get_logger(), "Found new sensor topic %s", topic_name.c_str());
+                active_subscribers[topic_name] = node->create_subscription<xbot_msgs::msg::SensorInfo>(
+                    topic_name, 1, [topic = topic_name](const xbot_msgs::msg::SensorInfo::SharedPtr msg) {
+                        RCLCPP_INFO(node->get_logger(), "Got sensor info for sensor on topic %s on topic %s",
+                                    msg->sensor_name.c_str(), topic.c_str());
+                        auto exist = found_sensors.count(topic);
+
+                        // Sensor already known and sensor-info equals?
+                        if(exist != 0 && found_sensors[topic] == *msg)
+                            return;
+
+                        {
+                            // Sensor is new or sensor-info differ from the buffered one
+                            std::unique_lock<std::mutex> lk(mqtt_callback_mutex);
+                            found_sensors[topic] = *msg;  // Save the (new|changed) sensor info
+                        }
+
+                        // Let the info subscription alive for dynamic threshold changes
+                        //active_subscribers.erase(topic);  // Stop subscribing to infos
+
+                        if (exist == 0) {
+                            subscribe_to_sensor(topic);  // Subscribe for data
+                        }
+
+                        // Republish (new|changed) sensor info
+                        // NOTE: If a sensor name or id changes, the related data topic wouldn't change!
+                        //       But do we dynamically change a sensor name or id?
+                        publish_sensor_metadata();
+                    }
+                );
+            }
+        }
+    );
+
+    executor.spin();
+    rclcpp::shutdown();
     return 0;
 }

@@ -1,20 +1,20 @@
-cmake_minimum_required(VERSION 2.8.3)
+cmake_minimum_required(VERSION 3.5)
 project(xesc_msgs)
 
-find_package(catkin REQUIRED COMPONENTS
-  std_msgs
-  message_generation
+find_package(ament_cmake REQUIRED)
+find_package(rosidl_default_generators REQUIRED)
+find_package(std_msgs REQUIRED)
+
+set(MSG_FILES
+  "msg/XescState.msg"
+  "msg/XescStateStamped.msg"
 )
 
-add_message_files(
-  DIRECTORY msg
-  FILES XescState.msg XescStateStamped.msg
-)
-
-generate_messages(
+rosidl_generate_interfaces(${PROJECT_NAME}
+  ${MSG_FILES}
   DEPENDENCIES std_msgs
 )
 
-catkin_package(
-  CATKIN_DEPENDS std_msgs message_runtime
-)
+ament_export_dependencies(rosidl_default_runtime)
+
+ament_package()

@@ -17,14 +17,14 @@
 
 #include "Behavior.h"
 #include "UndockingBehavior.h"
-#include "ftc_local_planner/PlannerGetProgress.h"
-#include "slic3r_coverage_planner/Path.h"
-#include "slic3r_coverage_planner/PlanPath.h"
-#include "xbot_msgs/ActionInfo.h"
+#include "ftc_local_planner/srv/planner_get_progress.hpp"
+#include "slic3r_coverage_planner/msg/path.hpp"
+#include "slic3r_coverage_planner/srv/plan_path.hpp"
+#include "xbot_msgs/msg/action_info.hpp"
 
 class MowingBehavior : public Behavior {
  private:
-  std::vector<xbot_msgs::ActionInfo> actions;
+  std::vector<xbot_msgs::msg::ActionInfo> actions;
 
   bool skip_area;
   bool skip_path;
@@ -34,9 +34,9 @@ class MowingBehavior : public Behavior {
 
   // Progress
   bool mowerEnabled = false;
-  std::vector<slic3r_coverage_planner::Path> currentMowingPaths;
+  std::vector<slic3r_coverage_planner::msg::Path> currentMowingPaths;
 
-  ros::Time last_checkpoint;
+  rclcpp::Time last_checkpoint;
   int currentMowingPath;
   int currentMowingArea;
   int currentMowingPathIndex;

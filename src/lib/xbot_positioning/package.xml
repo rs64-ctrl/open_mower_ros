@@ -1,5 +1,6 @@
 <?xml version="1.0"?>
-<package format="2">
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
   <name>xbot_positioning</name>
   <version>0.0.0</version>
   <description>The xbot_positioning package</description>
@@ -8,25 +9,23 @@
 
   <url type="website">https://github.com/ClemensElflein</url>
 
-  <buildtool_depend>catkin</buildtool_depend>
-  <build_depend>xbot_msgs</build_depend>
-  <build_depend>roscpp</build_depend>
-  <build_depend>robot_localization</build_depend>
-  <build_depend>tf2</build_depend>
-  <build_depend>tf2_geometry_msgs</build_depend>
-  <build_depend>sensor_msgs</build_depend>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>rosidl_default_generators</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>std_msgs</depend>
   <depend>geometry_msgs</depend>
-  <build_export_depend>sensor_msgs</build_export_depend>
-  <build_export_depend>xbot_msgs</build_export_depend>
-  <build_export_depend>roscpp</build_export_depend>
-  <build_export_depend>serial</build_export_depend>
-  <exec_depend>sensor_msgs</exec_depend>
-  <exec_depend>xbot_msgs</exec_depend>
-  <exec_depend>roscpp</exec_depend>
+  <depend>nav_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>tf2</depend>
+  <depend>tf2_ros</depend>
+  <depend>tf2_geometry_msgs</depend>
+  <depend>xbot_msgs</depend>
+  <build_depend>libboost-dev</build_depend>
 
-  <!-- The export tag contains other, unspecified, tags -->
+  <member_of_group>rosidl_interface_packages</member_of_group>
+
   <export>
-    <!-- Other tools can request additional information be placed here -->
-
+    <build_type>ament_cmake</build_type>
   </export>
 </package>

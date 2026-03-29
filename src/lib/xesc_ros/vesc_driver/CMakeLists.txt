@@ -1,34 +1,16 @@
-cmake_minimum_required(VERSION 2.8.3)
+cmake_minimum_required(VERSION 3.8)
 project(vesc_driver)
 
-add_compile_options(-std=c++11)
+set(CMAKE_CXX_STANDARD 17)
 
-find_package(catkin REQUIRED COMPONENTS
-  pluginlib
-  roscpp
-  std_msgs
-  xesc_msgs
-  serial
-        xesc_interface
-)
+find_package(ament_cmake REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(std_msgs REQUIRED)
+find_package(xesc_msgs REQUIRED)
+find_package(serial REQUIRED)
+find_package(xesc_interface REQUIRED)
 
-catkin_package(
-  INCLUDE_DIRS include
-  LIBRARIES vesc_driver
-  CATKIN_DEPENDS pluginlib roscpp std_msgs xesc_msgs serial
-)
-
-###########
-## Build ##
-###########
-
-include_directories(
-  include
-  ${Boost_INCLUDE_DIRS}
-  ${catkin_INCLUDE_DIRS}
-)
-
-# driver libraries
+# driver library
 add_library(vesc_driver
   src/vesc_driver.cpp
   src/vesc_interface.cpp
@@ -36,17 +18,33 @@ add_library(vesc_driver
   src/vesc_packet_factory.cpp
 )
 
-add_dependencies(vesc_driver ${catkin_EXPORTED_TARGETS})
+target_include_directories(vesc_driver PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
 
+ament_target_dependencies(vesc_driver
+  rclcpp
+  std_msgs
+  xesc_msgs
+  serial
+  xesc_interface
+)
 
-#############
-## Install ##
-#############
-
+# Install
 install(TARGETS vesc_driver
-  LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+  EXPORT export_${PROJECT_NAME}
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION bin
 )
 
-install(DIRECTORY include/${PROJECT_NAME}
-  DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
+install(DIRECTORY include/
+  DESTINATION include
 )
+
+ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
+ament_export_include_directories(include)
+ament_export_dependencies(rclcpp std_msgs xesc_msgs serial xesc_interface)
+
+ament_package()

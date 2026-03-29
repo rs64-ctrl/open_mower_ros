@@ -4,9 +4,6 @@
 
 #include "DiffDriveServiceInterface.h"
 
-#include <geometry_msgs/Twist.h>
-#include <geometry_msgs/TwistStamped.h>
-
 bool DiffDriveServiceInterface::OnConfigurationRequested(uint16_t service_id) {
   StartTransaction(true);
   SetRegisterWheelDistance(wheel_distance_);
@@ -15,8 +12,8 @@ bool DiffDriveServiceInterface::OnConfigurationRequested(uint16_t service_id) {
   return true;
 }
 
-void DiffDriveServiceInterface::SendTwist(const geometry_msgs::TwistConstPtr& msg) {
-  // Convert from ROS and publish
+void DiffDriveServiceInterface::SendTwist(const geometry_msgs::msg::Twist::ConstSharedPtr& msg) {
+  // Convert from ROS2 and publish
   double data[6]{};
   data[0] = msg->linear.x;
   data[1] = msg->linear.y;
@@ -30,11 +27,10 @@ void DiffDriveServiceInterface::SendTwist(const geometry_msgs::TwistConstPtr& ms
 void DiffDriveServiceInterface::OnActualTwistChanged(const double* new_value, uint32_t length) {
   // 3 linear, 3 angular
   if (length == 6) {
-    // Convert to ROS and publish
-    geometry_msgs::TwistStamped twist;
+    // Convert to ROS2 and publish
+    geometry_msgs::msg::TwistStamped twist;
     twist.header.frame_id = "base_link";
-    twist.header.stamp = ros::Time::now();
-    twist.header.seq = seq++;
+    twist.header.stamp = node_->get_clock()->now();
     twist.twist.linear.x = new_value[0];
     twist.twist.linear.y = new_value[1];
     twist.twist.linear.z = new_value[2];
@@ -42,7 +38,7 @@ void DiffDriveServiceInterface::OnActualTwistChanged(const double* new_value, ui
     twist.twist.angular.y = new_value[4];
     twist.twist.angular.z = new_value[5];
 
-    actual_twist_publisher_.publish(twist);
+    actual_twist_publisher_->publish(twist);
   }
 }
 
@@ -74,8 +70,8 @@ void DiffDriveServiceInterface::OnLeftESCTemperatureChanged(const float& new_val
 
 void DiffDriveServiceInterface::OnServiceConnected(uint16_t service_id) {
   std::unique_lock<std::mutex> lk{state_mutex_};
-  left_esc_state_.status = mower_msgs::ESCStatus::ESC_STATUS_DISCONNECTED;
-  right_esc_state_.status = mower_msgs::ESCStatus::ESC_STATUS_DISCONNECTED;
+  left_esc_state_.status = mower_msgs::msg::ESCStatus::ESC_STATUS_DISCONNECTED;
+  right_esc_state_.status = mower_msgs::msg::ESCStatus::ESC_STATUS_DISCONNECTED;
 }
 
 void DiffDriveServiceInterface::OnLeftESCStatusChanged(const uint8_t& new_value) {
@@ -90,12 +86,12 @@ void DiffDriveServiceInterface::OnRightESCStatusChanged(const uint8_t& new_value
 
 void DiffDriveServiceInterface::OnServiceDisconnected(uint16_t service_id) {
   std::unique_lock<std::mutex> lk{state_mutex_};
-  left_esc_state_.status = mower_msgs::ESCStatus::ESC_STATUS_DISCONNECTED;
-  right_esc_state_.status = mower_msgs::ESCStatus::ESC_STATUS_DISCONNECTED;
+  left_esc_state_.status = mower_msgs::msg::ESCStatus::ESC_STATUS_DISCONNECTED;
+  right_esc_state_.status = mower_msgs::msg::ESCStatus::ESC_STATUS_DISCONNECTED;
 }
 
 void DiffDriveServiceInterface::OnTransactionEnd() {
-  // Publish values to ROS
-  left_esc_status_publisher_.publish(left_esc_state_);
-  right_esc_status_publisher_.publish(right_esc_state_);
+  // Publish values to ROS2
+  left_esc_status_publisher_->publish(left_esc_state_);
+  right_esc_status_publisher_->publish(right_esc_state_);
 }

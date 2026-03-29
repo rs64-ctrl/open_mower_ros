@@ -1,0 +1,37 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>global_planner</name>
+  <version>2.0.0</version>
+  <description>
+     A path planner library and node (ROS2 port for MBF).
+  </description>
+  <maintainer email="davidvlu@gmail.com">David V. Lu!!</maintainer>
+  <license>BSD</license>
+
+  <author>David Lu!!</author>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <build_depend>angles</build_depend>
+  <build_depend>tf2_geometry_msgs</build_depend>
+
+  <depend>rclcpp</depend>
+  <depend>nav2_costmap_2d</depend>
+  <depend>geometry_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>pluginlib</depend>
+  <depend>tf2</depend>
+  <depend>tf2_ros</depend>
+  <depend>rcl_interfaces</depend>
+  <depend>mbf_costmap_core</depend>
+  <depend>mbf_utility</depend>
+
+  <exec_depend>angles</exec_depend>
+  <exec_depend>tf2_geometry_msgs</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+
+</package>

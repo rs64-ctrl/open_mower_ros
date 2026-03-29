@@ -36,9 +36,9 @@ bool PowerServiceInterface::OnConfigurationRequested(uint16_t service_id) {
 
 void PowerServiceInterface::OnTransactionStart(uint64_t timestamp) {
   power_msg_ = {};
-  power_msg_.stamp = ros::Time::now();
+  power_msg_.stamp = node_->get_clock()->now();
 }
 
 void PowerServiceInterface::OnTransactionEnd() {
-  status_publisher_.publish(power_msg_);
+  status_publisher_->publish(power_msg_);
 }

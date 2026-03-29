@@ -15,14 +15,14 @@
 #ifndef SRC_BEHAVIOR_H
 #define SRC_BEHAVIOR_H
 
-#include <actionlib/client/simple_action_client.h>
+#include <rclcpp/rclcpp.hpp>
+#include <rclcpp_action/rclcpp_action.hpp>
 
 #include <atomic>
 #include <memory>
 
 #include "mower_logic/MowerLogicConfig.h"
-#include "mower_msgs/HighLevelStatus.h"
-#include "ros/ros.h"
+#include "mower_msgs/msg/high_level_status.hpp"
 
 enum eAutoMode { MANUAL = 0, SEMIAUTO = 1, AUTO = 2 };
 
@@ -33,24 +33,27 @@ struct sSharedState {
   bool active_semiautomatic_task;
 };
 
+// Forward-declare the global node pointer used by behaviors
+extern rclcpp::Node::SharedPtr rosNode;
+
 /**
  * Behavior definition
  */
 class Behavior {
  private:
-  ros::Time startTime;
+  rclcpp::Time startTime;
 
  protected:
   std::atomic<bool> aborted;
   std::atomic<bool> paused;
 
-  std::atomic<u_int8_t> requested_pause_flag;
+  std::atomic<uint8_t> requested_pause_flag;
 
   std::atomic<bool> isGPSGood;
   std::atomic<uint8_t> sub_state;
 
   double time_in_state() {
-    return (ros::Time::now() - startTime).toSec();
+    return (rosNode->get_clock()->now() - startTime).seconds();
   }
 
   mower_logic::MowerLogicConfig config;
@@ -85,41 +88,75 @@ class Behavior {
   }
 
   void start(mower_logic::MowerLogicConfig& c, std::shared_ptr<sSharedState> s) {
-    ROS_INFO_STREAM("");
-    ROS_INFO_STREAM("");
-    ROS_INFO_STREAM("--------------------------------------");
-    ROS_INFO_STREAM("- Entered state: " << state_name());
-    ROS_INFO_STREAM("--------------------------------------");
+    RCLCPP_INFO(rosNode->get_logger(), "");
+    RCLCPP_INFO(rosNode->get_logger(), "");
+    RCLCPP_INFO(rosNode->get_logger(), "--------------------------------------");
+    RCLCPP_INFO(rosNode->get_logger(), "- Entered state: %s", state_name().c_str());
+    RCLCPP_INFO(rosNode->get_logger(), "--------------------------------------");
     aborted = false;
     paused = false;
     requested_pause_flag = 0;
     this->config = c;
     this->shared_state = std::move(s);
-    startTime = ros::Time::now();
+    startTime = rosNode->get_clock()->now();
     isGPSGood = false;
     sub_state = 0;
     enter();
   }
 
-  template <typename ActionSpec>
-  actionlib::SimpleClientGoalState sendGoalAndWaitUnlessAborted(
-      actionlib::SimpleActionClient<ActionSpec>* client, const typename ActionSpec::_action_goal_type::_goal_type& goal,
+  template <typename ActionT>
+  typename rclcpp_action::ClientGoalHandle<ActionT>::WrappedResult sendGoalAndWaitUnlessAborted(
+      typename rclcpp_action::Client<ActionT>::SharedPtr client,
+      const typename ActionT::Goal& goal,
       double poll_rate = 10) {
-    ros::Rate rate(poll_rate);
-    client->sendGoal(goal);
+    rclcpp::Rate rate(poll_rate);
 
-    while (true) {
+    auto send_goal_options = typename rclcpp_action::Client<ActionT>::SendGoalOptions();
+    auto goal_handle_future = client->async_send_goal(goal, send_goal_options);
+
+    // Wait for goal to be accepted
+    if (rclcpp::spin_until_future_complete(rosNode, goal_handle_future, std::chrono::seconds(10)) !=
+        rclcpp::FutureReturnCode::SUCCESS) {
+      typename rclcpp_action::ClientGoalHandle<ActionT>::WrappedResult wrapped;
+      wrapped.code = rclcpp_action::ResultCode::ABORTED;
+      return wrapped;
+    }
+
+    auto goal_handle = goal_handle_future.get();
+    if (!goal_handle) {
+      typename rclcpp_action::ClientGoalHandle<ActionT>::WrappedResult wrapped;
+      wrapped.code = rclcpp_action::ResultCode::ABORTED;
+      return wrapped;
+    }
+
+    auto result_future = client->async_get_result(goal_handle);
+
+    while (rclcpp::ok()) {
       rate.sleep();
 
-      auto state = client->getState();
       if (aborted) {
-        client->cancelGoal();
-        return state;
+        client->async_cancel_goal(goal_handle);
+        // Wait briefly for cancellation
+        rclcpp::spin_until_future_complete(rosNode, result_future, std::chrono::seconds(2));
+        if (result_future.valid() &&
+            result_future.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+          return result_future.get();
+        }
+        typename rclcpp_action::ClientGoalHandle<ActionT>::WrappedResult wrapped;
+        wrapped.code = rclcpp_action::ResultCode::CANCELED;
+        return wrapped;
       }
-      if (state.isDone()) {
-        return state;
+
+      if (result_future.valid() &&
+          result_future.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+        return result_future.get();
       }
     }
+
+    // Should not reach here
+    typename rclcpp_action::ClientGoalHandle<ActionT>::WrappedResult wrapped;
+    wrapped.code = rclcpp_action::ResultCode::ABORTED;
+    return wrapped;
   }
 
   /**
@@ -144,7 +181,7 @@ class Behavior {
    */
   void abort() {
     if (!aborted) {
-      ROS_INFO_STREAM("- Behaviour.h: abort() called");
+      RCLCPP_INFO(rosNode->get_logger(), "- Behaviour.h: abort() called");
     }
     aborted = true;
   }

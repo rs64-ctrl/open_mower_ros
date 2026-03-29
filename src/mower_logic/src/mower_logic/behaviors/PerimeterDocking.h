@@ -17,19 +17,6 @@
 
 #include "Behavior.h"
 
-/*
-#include <actionlib/client/simple_action_client.h>
-#include <mbf_msgs/ExePathAction.h>
-#include <mbf_msgs/MoveBaseAction.h>
-#include <mower_map/GetDockingPointSrv.h>
-#include <nav_msgs/Odometry.h>
-#include <tf2/LinearMath/Transform.h>
-
-#include "mower_msgs/Status.h"
-#include "ros/ros.h"
-#include "tf2_geometry_msgs/tf2_geometry_msgs.h"
-*/
-
 class PerimeterBase : public Behavior {
  public:
   void enter() override;
@@ -55,13 +42,7 @@ class PerimeterFollowBehavior : public PerimeterBase {
   Behavior* execute() override;
 
  protected:
-  /**
-   * @brief distance travelled.
-   */
   double travelled;
-  /**
-   * @brief We arrived and should continue with the returned Behavior.
-   */
   virtual Behavior* arrived() = 0;
 };
 
@@ -80,9 +61,6 @@ class PerimeterDockingBehavior : public PerimeterFollowBehavior {
 class PerimeterSearchBehavior : public PerimeterBase {
  public:
   static PerimeterSearchBehavior INSTANCE;
-  /**
-   * Is usage configured?
-   */
   static int configured(const mower_logic::MowerLogicConfig& config);
 
   std::string state_name() override;
@@ -92,9 +70,6 @@ class PerimeterSearchBehavior : public PerimeterBase {
 class PerimeterUndockingBehavior : public PerimeterBase {
  public:
   static PerimeterUndockingBehavior INSTANCE;
-  /**
-   * Is usage configured?
-   */
   static int configured(const mower_logic::MowerLogicConfig& config);
 
   std::string state_name() override;

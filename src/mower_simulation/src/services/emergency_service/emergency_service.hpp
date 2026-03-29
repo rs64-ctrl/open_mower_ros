@@ -5,7 +5,7 @@
 #ifndef EMERGENCY_SERVICE_HPP
 #define EMERGENCY_SERVICE_HPP
 
-#include <ros/time.h>
+#include <rclcpp/rclcpp.hpp>
 
 #include <EmergencyServiceBase.hpp>
 
@@ -30,7 +30,6 @@ class EmergencyService : public EmergencyServiceBase {
 
   SimRobot& robot_;
 
-  ros::Time last_clear_emergency_message_{0};
   std::string emergency_reason{"Boot"};
 
  protected:

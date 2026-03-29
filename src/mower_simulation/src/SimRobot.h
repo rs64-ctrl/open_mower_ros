@@ -5,10 +5,11 @@
 #ifndef SIMROBOT_H
 #define SIMROBOT_H
 
-#include <nav_msgs/Odometry.h>
-#include <ros/ros.h>
-#include <xbot_positioning/GPSControlSrv.h>
-#include <xbot_positioning/SetPoseSrv.h>
+#include <nav_msgs/msg/odometry.hpp>
+#include <rclcpp/rclcpp.hpp>
+#include <xbot_msgs/msg/absolute_pose.hpp>
+#include <xbot_positioning/srv/gps_control_srv.hpp>
+#include <xbot_positioning/srv/set_pose_srv.hpp>
 
 #include <mutex>
 #include <random>
@@ -16,7 +17,7 @@
 
 class SimRobot {
  public:
-  explicit SimRobot(ros::NodeHandle& nh);
+  explicit SimRobot(rclcpp::Node::SharedPtr node);
   void Start();
 
   void GetTwist(double& vx, double& vr);
@@ -34,10 +35,12 @@ class SimRobot {
   void GetIsCharging(bool& charging, double& seconds_since_start, std::string& charging_status, double& charger_volts,
                      double& battery_volts, double& charging_current);
 
-  bool OnSetPose(xbot_positioning::SetPoseSrvRequest& req, xbot_positioning::SetPoseSrvResponse& res);
-  bool OnSetGpsState(xbot_positioning::GPSControlSrvRequest& req, xbot_positioning::GPSControlSrvResponse& res);
-
  private:
+  void OnSetPose(const std::shared_ptr<xbot_positioning::srv::SetPoseSrv::Request> req,
+                 std::shared_ptr<xbot_positioning::srv::SetPoseSrv::Response> res);
+  void OnSetGpsState(const std::shared_ptr<xbot_positioning::srv::GPSControlSrv::Request> req,
+                     std::shared_ptr<xbot_positioning::srv::GPSControlSrv::Response> res);
+
   // 7 cells
   static constexpr double BATTERY_VOLTS_MIN = 3.2 * 7;
   static constexpr double BATTERY_VOLTS_MAX = 4.18 * 7;
@@ -67,19 +70,19 @@ class SimRobot {
   // Latched Emergency
   bool emergency_latch_ = false;
   std::string emergency_reason_{"Boot"};
-  ros::Time last_update_{0};
-  ros::NodeHandle nh_;
+  rclcpp::Time last_update_{0, 0, RCL_ROS_TIME};
+  rclcpp::Node::SharedPtr node_;
 
   bool is_charging_ = false;
-  ros::Time charging_started_time;
+  rclcpp::Time charging_started_time_{0, 0, RCL_ROS_TIME};
   double charger_volts_ = 0;
   double battery_volts_ = BATTERY_VOLTS_MAX;
   double charge_current_ = 0;
   std::string charger_state_{"Unknown"};
 
   // Timer for simulation
-  ros::Timer timer_;
-  void SimulationStep(const ros::TimerEvent& te);
+  rclcpp::TimerBase::SharedPtr timer_;
+  void SimulationStep();
   void PublishPosition();
 
   /*
@@ -91,10 +94,10 @@ class SimRobot {
   std::normal_distribution<double> linear_speed_noise{0.0, 0.02};
   std::normal_distribution<double> angular_speed_noise{0.0, 0.02};
 
-  ros::ServiceServer gps_service_;
-  ros::ServiceServer pose_service_;
-  ros::Publisher odometry_pub_{};
-  ros::Publisher xbot_absolute_pose_pub_{};
+  rclcpp::Service<xbot_positioning::srv::GPSControlSrv>::SharedPtr gps_service_;
+  rclcpp::Service<xbot_positioning::srv::SetPoseSrv>::SharedPtr pose_service_;
+  rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odometry_pub_;
+  rclcpp::Publisher<xbot_msgs::msg::AbsolutePose>::SharedPtr xbot_absolute_pose_pub_;
   bool gps_enabled_ = true;
 };
 

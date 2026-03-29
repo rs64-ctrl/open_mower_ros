@@ -1,8 +1,7 @@
 
 #include <ftc_local_planner/ftc_planner.h>
 
-#include <pluginlib/class_list_macros.h>
-#include "mbf_msgs/ExePathAction.h"
+#include <pluginlib/class_list_macros.hpp>
 
 PLUGINLIB_EXPORT_CLASS(ftc_local_planner::FTCPlanner, mbf_costmap_core::CostmapController)
 
@@ -17,68 +16,228 @@ namespace ftc_local_planner
     {
     }
 
-    void FTCPlanner::initialize(std::string name, tf2_ros::Buffer *tf, costmap_2d::Costmap2DROS *costmap_ros)
+    void FTCPlanner::declareParameters()
     {
-        ros::NodeHandle private_nh("~/" + name);
+        auto & n = *node_;
 
-        progress_server = private_nh.advertiseService(
-            "planner_get_progress", &FTCPlanner::getProgress, this);
+        // ControlPoint group
+        n.declare_parameter("speed_fast", config.speed_fast);
+        n.declare_parameter("speed_fast_threshold", config.speed_fast_threshold);
+        n.declare_parameter("speed_fast_threshold_angle", config.speed_fast_threshold_angle);
+        n.declare_parameter("speed_slow", config.speed_slow);
+        n.declare_parameter("speed_angular", config.speed_angular);
+        n.declare_parameter("acceleration", config.acceleration);
 
-        global_point_pub = private_nh.advertise<geometry_msgs::PoseStamped>("global_point", 1);
-        global_plan_pub = private_nh.advertise<nav_msgs::Path>("global_plan", 1, true);
-        obstacle_marker_pub = private_nh.advertise<visualization_msgs::Marker>("costmap_marker", 10);
+        // PID group
+        n.declare_parameter("kp_lon", config.kp_lon);
+        n.declare_parameter("ki_lon", config.ki_lon);
+        n.declare_parameter("ki_lon_max", config.ki_lon_max);
+        n.declare_parameter("kd_lon", config.kd_lon);
+        n.declare_parameter("ki_lat", config.ki_lat);
+        n.declare_parameter("ki_lat_max", config.ki_lat_max);
+        n.declare_parameter("kp_lat", config.kp_lat);
+        n.declare_parameter("kd_lat", config.kd_lat);
+        n.declare_parameter("kp_ang", config.kp_ang);
+        n.declare_parameter("ki_ang", config.ki_ang);
+        n.declare_parameter("ki_ang_max", config.ki_ang_max);
+        n.declare_parameter("kd_ang", config.kd_ang);
+
+        // Robot group
+        n.declare_parameter("max_cmd_vel_speed", config.max_cmd_vel_speed);
+        n.declare_parameter("max_cmd_vel_ang", config.max_cmd_vel_ang);
+        n.declare_parameter("max_goal_distance_error", config.max_goal_distance_error);
+        n.declare_parameter("max_goal_angle_error", config.max_goal_angle_error);
+        n.declare_parameter("goal_timeout", config.goal_timeout);
+        n.declare_parameter("max_follow_distance", config.max_follow_distance);
+
+        // Top-level
+        n.declare_parameter("forward_only", config.forward_only);
+        n.declare_parameter("restore_defaults", config.restore_defaults);
+        n.declare_parameter("debug_pid", config.debug_pid);
+
+        // Recovery group
+        n.declare_parameter("oscillation_recovery", config.oscillation_recovery);
+        n.declare_parameter("oscillation_v_eps", config.oscillation_v_eps);
+        n.declare_parameter("oscillation_omega_eps", config.oscillation_omega_eps);
+        n.declare_parameter("oscillation_recovery_min_duration", config.oscillation_recovery_min_duration);
+
+        // Obstacles group
+        n.declare_parameter("check_obstacles", config.check_obstacles);
+        n.declare_parameter("obstacle_lookahead", config.obstacle_lookahead);
+        n.declare_parameter("obstacle_footprint", config.obstacle_footprint);
+        n.declare_parameter("debug_obstacle", config.debug_obstacle);
+
+        // Read initial values
+        config.speed_fast = n.get_parameter("speed_fast").as_double();
+        config.speed_fast_threshold = n.get_parameter("speed_fast_threshold").as_double();
+        config.speed_fast_threshold_angle = n.get_parameter("speed_fast_threshold_angle").as_double();
+        config.speed_slow = n.get_parameter("speed_slow").as_double();
+        config.speed_angular = n.get_parameter("speed_angular").as_double();
+        config.acceleration = n.get_parameter("acceleration").as_double();
+
+        config.kp_lon = n.get_parameter("kp_lon").as_double();
+        config.ki_lon = n.get_parameter("ki_lon").as_double();
+        config.ki_lon_max = n.get_parameter("ki_lon_max").as_double();
+        config.kd_lon = n.get_parameter("kd_lon").as_double();
+        config.ki_lat = n.get_parameter("ki_lat").as_double();
+        config.ki_lat_max = n.get_parameter("ki_lat_max").as_double();
+        config.kp_lat = n.get_parameter("kp_lat").as_double();
+        config.kd_lat = n.get_parameter("kd_lat").as_double();
+        config.kp_ang = n.get_parameter("kp_ang").as_double();
+        config.ki_ang = n.get_parameter("ki_ang").as_double();
+        config.ki_ang_max = n.get_parameter("ki_ang_max").as_double();
+        config.kd_ang = n.get_parameter("kd_ang").as_double();
+
+        config.max_cmd_vel_speed = n.get_parameter("max_cmd_vel_speed").as_double();
+        config.max_cmd_vel_ang = n.get_parameter("max_cmd_vel_ang").as_double();
+        config.max_goal_distance_error = n.get_parameter("max_goal_distance_error").as_double();
+        config.max_goal_angle_error = n.get_parameter("max_goal_angle_error").as_double();
+        config.goal_timeout = n.get_parameter("goal_timeout").as_double();
+        config.max_follow_distance = n.get_parameter("max_follow_distance").as_double();
+
+        config.forward_only = n.get_parameter("forward_only").as_bool();
+        config.restore_defaults = n.get_parameter("restore_defaults").as_bool();
+        config.debug_pid = n.get_parameter("debug_pid").as_bool();
+
+        config.oscillation_recovery = n.get_parameter("oscillation_recovery").as_bool();
+        config.oscillation_v_eps = n.get_parameter("oscillation_v_eps").as_double();
+        config.oscillation_omega_eps = n.get_parameter("oscillation_omega_eps").as_double();
+        config.oscillation_recovery_min_duration = n.get_parameter("oscillation_recovery_min_duration").as_double();
+
+        config.check_obstacles = n.get_parameter("check_obstacles").as_bool();
+        config.obstacle_lookahead = n.get_parameter("obstacle_lookahead").as_int();
+        config.obstacle_footprint = n.get_parameter("obstacle_footprint").as_bool();
+        config.debug_obstacle = n.get_parameter("debug_obstacle").as_bool();
+
+        // Store defaults for restore_defaults functionality
+        default_config = config;
+    }
+
+    rcl_interfaces::msg::SetParametersResult FTCPlanner::parametersCallback(
+        const std::vector<rclcpp::Parameter> &parameters)
+    {
+        rcl_interfaces::msg::SetParametersResult result;
+        result.successful = true;
+
+        for (const auto &param : parameters)
+        {
+            const auto &name = param.get_name();
+
+            // ControlPoint
+            if (name == "speed_fast") config.speed_fast = param.as_double();
+            else if (name == "speed_fast_threshold") config.speed_fast_threshold = param.as_double();
+            else if (name == "speed_fast_threshold_angle") config.speed_fast_threshold_angle = param.as_double();
+            else if (name == "speed_slow") config.speed_slow = param.as_double();
+            else if (name == "speed_angular") config.speed_angular = param.as_double();
+            else if (name == "acceleration") config.acceleration = param.as_double();
+
+            // PID
+            else if (name == "kp_lon") config.kp_lon = param.as_double();
+            else if (name == "ki_lon") config.ki_lon = param.as_double();
+            else if (name == "ki_lon_max") config.ki_lon_max = param.as_double();
+            else if (name == "kd_lon") config.kd_lon = param.as_double();
+            else if (name == "ki_lat") config.ki_lat = param.as_double();
+            else if (name == "ki_lat_max") config.ki_lat_max = param.as_double();
+            else if (name == "kp_lat") config.kp_lat = param.as_double();
+            else if (name == "kd_lat") config.kd_lat = param.as_double();
+            else if (name == "kp_ang") config.kp_ang = param.as_double();
+            else if (name == "ki_ang") config.ki_ang = param.as_double();
+            else if (name == "ki_ang_max") config.ki_ang_max = param.as_double();
+            else if (name == "kd_ang") config.kd_ang = param.as_double();
+
+            // Robot
+            else if (name == "max_cmd_vel_speed") config.max_cmd_vel_speed = param.as_double();
+            else if (name == "max_cmd_vel_ang") config.max_cmd_vel_ang = param.as_double();
+            else if (name == "max_goal_distance_error") config.max_goal_distance_error = param.as_double();
+            else if (name == "max_goal_angle_error") config.max_goal_angle_error = param.as_double();
+            else if (name == "goal_timeout") config.goal_timeout = param.as_double();
+            else if (name == "max_follow_distance") config.max_follow_distance = param.as_double();
+
+            // Top-level
+            else if (name == "forward_only") config.forward_only = param.as_bool();
+            else if (name == "restore_defaults")
+            {
+                if (param.as_bool())
+                {
+                    config = default_config;
+                    config.restore_defaults = false;
+                }
+            }
+            else if (name == "debug_pid") config.debug_pid = param.as_bool();
+
+            // Recovery
+            else if (name == "oscillation_recovery") config.oscillation_recovery = param.as_bool();
+            else if (name == "oscillation_v_eps") config.oscillation_v_eps = param.as_double();
+            else if (name == "oscillation_omega_eps") config.oscillation_omega_eps = param.as_double();
+            else if (name == "oscillation_recovery_min_duration") config.oscillation_recovery_min_duration = param.as_double();
+
+            // Obstacles
+            else if (name == "check_obstacles") config.check_obstacles = param.as_bool();
+            else if (name == "obstacle_lookahead") config.obstacle_lookahead = static_cast<int>(param.as_int());
+            else if (name == "obstacle_footprint") config.obstacle_footprint = param.as_bool();
+            else if (name == "debug_obstacle") config.debug_obstacle = param.as_bool();
+        }
+
+        // Update speed and recovery detector
+        current_movement_speed = config.speed_slow;
+        failure_detector_.setBufferLength(std::round(config.oscillation_recovery_min_duration * 10));
+
+        return result;
+    }
+
+    void FTCPlanner::initialize(std::string name, const rclcpp::Node::SharedPtr & node,
+                                tf2_ros::Buffer *tf, nav2_costmap_2d::Costmap2DROS *costmap_ros)
+    {
+        node_ = node;
+
+        progress_server_ = node_->create_service<ftc_local_planner::srv::PlannerGetProgress>(
+            "~/" + name + "/planner_get_progress",
+            std::bind(&FTCPlanner::getProgress, this, std::placeholders::_1, std::placeholders::_2));
+
+        global_point_pub = node_->create_publisher<geometry_msgs::msg::PoseStamped>(
+            "~/" + name + "/global_point", 1);
+        global_plan_pub = node_->create_publisher<nav_msgs::msg::Path>(
+            "~/" + name + "/global_plan", rclcpp::QoS(1).transient_local());
+        obstacle_marker_pub = node_->create_publisher<visualization_msgs::msg::Marker>(
+            "~/" + name + "/costmap_marker", 10);
 
         costmap = costmap_ros;
         costmap_map_ = costmap->getCostmap();
         tf_buffer = tf;
 
-        // Parameter for dynamic reconfigure
-        reconfig_server = new dynamic_reconfigure::Server<FTCPlannerConfig>(private_nh);
-        dynamic_reconfigure::Server<FTCPlannerConfig>::CallbackType cb = boost::bind(&FTCPlanner::reconfigureCB, this,
-                                                                                     _1, _2);
-        reconfig_server->setCallback(cb);
+        // Declare and load parameters (replaces dynamic_reconfigure)
+        declareParameters();
+
+        // Register parameter change callback
+        param_callback_handle_ = node_->add_on_set_parameters_callback(
+            std::bind(&FTCPlanner::parametersCallback, this, std::placeholders::_1));
 
         current_state = PRE_ROTATE;
 
         // PID Debugging topic
         if (config.debug_pid)
         {
-            pubPid = private_nh.advertise<ftc_local_planner::PID>("debug_pid", 1, true);
+            pubPid = node_->create_publisher<ftc_local_planner::msg::PID>(
+                "~/" + name + "/debug_pid", rclcpp::QoS(1).transient_local());
         }
 
         // Recovery behavior initialization
         failure_detector_.setBufferLength(std::round(config.oscillation_recovery_min_duration * 10));
 
-        ROS_INFO("FTCLocalPlannerROS: Version 2 Init.");
+        RCLCPP_INFO(node_->get_logger(), "FTCLocalPlannerROS: Version 2 Init.");
     }
 
-    void FTCPlanner::reconfigureCB(FTCPlannerConfig &c, uint32_t level)
-    {
-        if (c.restore_defaults)
-        {
-            reconfig_server->getConfigDefault(c);
-            c.restore_defaults = false;
-        }
-        config = c;
-
-        // just to be sure
-        current_movement_speed = config.speed_slow;
-
-        // set recovery behavior
-        failure_detector_.setBufferLength(std::round(config.oscillation_recovery_min_duration * 10));
-    }
-
-    bool FTCPlanner::setPlan(const std::vector<geometry_msgs::PoseStamped> &plan)
+    bool FTCPlanner::setPlan(const std::vector<geometry_msgs::msg::PoseStamped> &plan)
     {
         current_state = PRE_ROTATE;
-        state_entered_time = ros::Time::now();
+        state_entered_time = node_->now();
         is_crashed = false;
 
         global_plan = plan;
         current_index = 0;
         current_progress = 0.0;
 
-        last_time = ros::Time::now();
+        last_time = node_->now();
         current_movement_speed = config.speed_slow;
 
         lat_error = 0.0;
@@ -88,37 +247,34 @@ namespace ftc_local_planner
         i_lat_error = 0.0;
         i_angle_error = 0.0;
 
-        nav_msgs::Path path;
+        nav_msgs::msg::Path path;
 
         if (global_plan.size() > 2)
         {
             // duplicate last point
             global_plan.push_back(global_plan.back());
-            // give second from last point last oriantation as the point before that
+            // give second from last point last orientation as the point before that
             global_plan[global_plan.size() - 2].pose.orientation = global_plan[global_plan.size() - 3].pose.orientation;
             path.header = plan.front().header;
             path.poses = plan;
         }
         else
         {
-            ROS_WARN_STREAM("FTCLocalPlannerROS: Global plan was too short. Need a minimum of 3 poses - Cancelling.");
+            RCLCPP_WARN_STREAM(node_->get_logger(),
+                "FTCLocalPlannerROS: Global plan was too short. Need a minimum of 3 poses - Cancelling.");
             current_state = FINISHED;
-            state_entered_time = ros::Time::now();
+            state_entered_time = node_->now();
         }
-        global_plan_pub.publish(path);
+        global_plan_pub->publish(path);
 
-        ROS_INFO_STREAM("FTCLocalPlannerROS: Got new global plan with " << plan.size() << " points.");
+        RCLCPP_INFO_STREAM(node_->get_logger(),
+            "FTCLocalPlannerROS: Got new global plan with " << plan.size() << " points.");
 
         return true;
     }
 
     FTCPlanner::~FTCPlanner()
     {
-        if (reconfig_server != nullptr)
-        {
-            delete reconfig_server;
-            reconfig_server = nullptr;
-        }
     }
 
     double FTCPlanner::distanceLookahead()
@@ -146,19 +302,17 @@ namespace ftc_local_planner
 
             lookahead_distance += (current_point.translation() - last_straight_point.translation()).norm();
             last_straight_point = current_point;
-
         }
 
         return lookahead_distance;
     }
 
-    uint32_t FTCPlanner::computeVelocityCommands(const geometry_msgs::PoseStamped &pose,
-                                                 const geometry_msgs::TwistStamped &velocity,
-                                                 geometry_msgs::TwistStamped &cmd_vel, std::string &message)
+    uint32_t FTCPlanner::computeVelocityCommands(const geometry_msgs::msg::PoseStamped &pose,
+                                                 const geometry_msgs::msg::TwistStamped &velocity,
+                                                 geometry_msgs::msg::TwistStamped &cmd_vel, std::string &message)
     {
-
-        ros::Time now = ros::Time::now();
-        double dt = now.toSec() - last_time.toSec();
+        rclcpp::Time now = node_->now();
+        double dt = (now - last_time).seconds();
         last_time = now;
 
         if (is_crashed)
@@ -176,14 +330,15 @@ namespace ftc_local_planner
         }
 
         // We're not crashed and not finished.
-        // First, we update the control point if needed. This is needed since we need the local_control_point to calculate the next state.
+        // First, we update the control point if needed.
         update_control_point(dt);
         // Then, update the planner state.
         auto new_planner_state = update_planner_state();
         if (new_planner_state != current_state)
         {
-            ROS_INFO_STREAM("FTCLocalPlannerROS: Switching to state " << new_planner_state);
-            state_entered_time = ros::Time::now();
+            RCLCPP_INFO_STREAM(node_->get_logger(),
+                "FTCLocalPlannerROS: Switching to state " << new_planner_state);
+            state_entered_time = node_->now();
             current_state = new_planner_state;
         }
 
@@ -208,7 +363,6 @@ namespace ftc_local_planner
         return RET_SUCCESS;
     }
 
-
     bool FTCPlanner::isGoalReached(double dist_tolerance, double angle_tolerance)
     {
         return current_state == FINISHED && !is_crashed;
@@ -216,9 +370,9 @@ namespace ftc_local_planner
 
     bool FTCPlanner::cancel()
     {
-        ROS_WARN_STREAM("FTCLocalPlannerROS: FTC planner was cancelled.");
+        RCLCPP_WARN_STREAM(node_->get_logger(), "FTCLocalPlannerROS: FTC planner was cancelled.");
         current_state = FINISHED;
-        state_entered_time = ros::Time::now();
+        state_entered_time = node_->now();
         return true;
     }
 
@@ -230,13 +384,16 @@ namespace ftc_local_planner
         {
             if (time_in_current_state() > config.goal_timeout)
             {
-                ROS_ERROR_STREAM("FTCLocalPlannerROS: Error reaching goal. config.goal_timeout (" << config.goal_timeout << ") reached - Timeout in PRE_ROTATE phase.");
+                RCLCPP_ERROR_STREAM(node_->get_logger(),
+                    "FTCLocalPlannerROS: Error reaching goal. config.goal_timeout ("
+                    << config.goal_timeout << ") reached - Timeout in PRE_ROTATE phase.");
                 is_crashed = true;
                 return FINISHED;
             }
             if (abs(angle_error) * (180.0 / M_PI) < config.max_goal_angle_error)
             {
-                ROS_INFO_STREAM("FTCLocalPlannerROS: PRE_ROTATE finished. Starting following");
+                RCLCPP_INFO_STREAM(node_->get_logger(),
+                    "FTCLocalPlannerROS: PRE_ROTATE finished. Starting following");
                 return FOLLOWING;
             }
         }
@@ -247,7 +404,10 @@ namespace ftc_local_planner
             // check for crash
             if (distance > config.max_follow_distance)
             {
-                ROS_ERROR_STREAM("FTCLocalPlannerROS: Robot is far away from global plan. distance (" << distance << ") > config.max_follow_distance (" << config.max_follow_distance << ") It probably has crashed.");
+                RCLCPP_ERROR_STREAM(node_->get_logger(),
+                    "FTCLocalPlannerROS: Robot is far away from global plan. distance ("
+                    << distance << ") > config.max_follow_distance ("
+                    << config.max_follow_distance << ") It probably has crashed.");
                 is_crashed = true;
                 return FINISHED;
             }
@@ -255,7 +415,8 @@ namespace ftc_local_planner
             // check if we're done following
             if (current_index == global_plan.size() - 2)
             {
-                ROS_INFO_STREAM("FTCLocalPlannerROS: switching planner to position mode");
+                RCLCPP_INFO_STREAM(node_->get_logger(),
+                    "FTCLocalPlannerROS: switching planner to position mode");
                 return WAITING_FOR_GOAL_APPROACH;
             }
         }
@@ -265,12 +426,15 @@ namespace ftc_local_planner
             double distance = local_control_point.translation().norm();
             if (time_in_current_state() > config.goal_timeout)
             {
-                ROS_WARN_STREAM("FTCLocalPlannerROS: Could not reach goal position. config.goal_timeout (" << config.goal_timeout << ") reached - Attempting final rotation anyways.");
+                RCLCPP_WARN_STREAM(node_->get_logger(),
+                    "FTCLocalPlannerROS: Could not reach goal position. config.goal_timeout ("
+                    << config.goal_timeout << ") reached - Attempting final rotation anyways.");
                 return POST_ROTATE;
             }
             if (distance < config.max_goal_distance_error)
             {
-                ROS_INFO_STREAM("FTCLocalPlannerROS: Reached goal position.");
+                RCLCPP_INFO_STREAM(node_->get_logger(),
+                    "FTCLocalPlannerROS: Reached goal position.");
                 return POST_ROTATE;
             }
         }
@@ -279,12 +443,15 @@ namespace ftc_local_planner
         {
             if (time_in_current_state() > config.goal_timeout)
             {
-                ROS_WARN_STREAM("FTCLocalPlannerROS: Could not reach goal rotation. config.goal_timeout (" << config.goal_timeout << ") reached");
+                RCLCPP_WARN_STREAM(node_->get_logger(),
+                    "FTCLocalPlannerROS: Could not reach goal rotation. config.goal_timeout ("
+                    << config.goal_timeout << ") reached");
                 return FINISHED;
             }
             if (abs(angle_error) * (180.0 / M_PI) < config.max_goal_angle_error)
             {
-                ROS_INFO_STREAM("FTCLocalPlannerROS: POST_ROTATE finished.");
+                RCLCPP_INFO_STREAM(node_->get_logger(),
+                    "FTCLocalPlannerROS: POST_ROTATE finished.");
                 return FINISHED;
             }
         }
@@ -355,7 +522,8 @@ namespace ftc_local_planner
 
                 if (pose_distance <= 0.0)
                 {
-                    ROS_WARN_STREAM("FTCLocalPlannerROS: Skipping duplicate point in global plan.");
+                    RCLCPP_WARN_STREAM(node_->get_logger(),
+                        "FTCLocalPlannerROS: Skipping duplicate point in global plan.");
                     current_index++;
                     continue;
                 }
@@ -366,7 +534,6 @@ namespace ftc_local_planner
                 if (remaining_distance_to_next_pose < distance_to_move &&
                     remaining_angular_distance_to_next_pose < angle_to_move)
                 {
-                    // we need to move further than the remaining distance_to_move. Skip to the next point and decrease distance_to_move.
                     current_progress = 0.0;
                     current_index++;
                     distance_to_move -= remaining_distance_to_next_pose;
@@ -374,7 +541,6 @@ namespace ftc_local_planner
                 }
                 else
                 {
-                    // we cannot reach the next point yet, so we update the percentage
                     double current_progress_distance =
                         (pose_distance * current_progress + distance_to_move) / pose_distance;
                     double current_progress_angle =
@@ -382,8 +548,8 @@ namespace ftc_local_planner
                     current_progress = fmin(current_progress_angle, current_progress_distance);
                     if (current_progress > 1.0)
                     {
-                        ROS_WARN_STREAM("FTCLocalPlannerROS: FTC PLANNER: Progress > 1.0");
-                        //                    current_progress = 1.0;
+                        RCLCPP_WARN_STREAM(node_->get_logger(),
+                            "FTCLocalPlannerROS: FTC PLANNER: Progress > 1.0");
                     }
                     distance_to_move = 0;
                     angle_to_move = 0;
@@ -416,12 +582,13 @@ namespace ftc_local_planner
         }
 
         {
-            geometry_msgs::PoseStamped viz;
+            geometry_msgs::msg::PoseStamped viz;
             viz.header = global_plan[current_index].header;
             viz.pose = tf2::toMsg(current_control_point);
-            global_point_pub.publish(viz);
+            global_point_pub->publish(viz);
         }
-        auto map_to_base = tf_buffer->lookupTransform("base_link", "map", ros::Time(), ros::Duration(1.0));
+        auto map_to_base = tf_buffer->lookupTransform(
+            "base_link", "map", tf2::TimePointZero, tf2::durationFromSec(1.0));
         tf2::doTransform(current_control_point, local_control_point, map_to_base);
 
         lat_error = local_control_point.translation().y();
@@ -429,7 +596,7 @@ namespace ftc_local_planner
         angle_error = local_control_point.rotation().eulerAngles(0, 1, 2).z();
     }
 
-    void FTCPlanner::calculate_velocity_commands(double dt, geometry_msgs::TwistStamped &cmd_vel)
+    void FTCPlanner::calculate_velocity_commands(double dt, geometry_msgs::msg::TwistStamped &cmd_vel)
     {
         // check, if we're completely done
         if (current_state == FINISHED || is_crashed)
@@ -477,7 +644,6 @@ namespace ftc_local_planner
         last_angle_error = angle_error;
 
         // allow linear movement only if in following state
-
         if (current_state == FOLLOWING)
         {
             double lin_speed = lon_error * config.kp_lon + i_lon_error * config.ki_lon + d_lon * config.kd_lon;
@@ -510,7 +676,6 @@ namespace ftc_local_planner
 
         if (current_state == FOLLOWING)
         {
-
             double ang_speed = angle_error * config.kp_ang + i_angle_error * config.ki_ang + d_angle * config.kd_ang +
                                lat_error * config.kp_lat + i_lat_error * config.ki_lat + d_lat * config.kd_lat;
 
@@ -550,7 +715,7 @@ namespace ftc_local_planner
 
         if (config.debug_pid)
         {
-            ftc_local_planner::PID debugPidMsg;
+            ftc_local_planner::msg::PID debugPidMsg;
             debugPidMsg.kp_lon_set = lon_error;
 
             // proportional
@@ -577,14 +742,16 @@ namespace ftc_local_planner
             debugPidMsg.ang_speed = cmd_vel.twist.angular.z;
             debugPidMsg.lin_speed = cmd_vel.twist.linear.x;
 
-            pubPid.publish(debugPidMsg);
+            pubPid->publish(debugPidMsg);
         }
     }
 
-    bool FTCPlanner::getProgress(PlannerGetProgressRequest &req, PlannerGetProgressResponse &res)
+    void FTCPlanner::getProgress(
+        const std::shared_ptr<ftc_local_planner::srv::PlannerGetProgress::Request> request,
+        std::shared_ptr<ftc_local_planner::srv::PlannerGetProgress::Response> response)
     {
-        res.index = current_index;
-        return true;
+        (void)request;
+        response->index = current_index;
     }
 
     bool FTCPlanner::checkCollision(int max_points)
@@ -592,8 +759,8 @@ namespace ftc_local_planner
         unsigned int x;
         unsigned int y;
 
-        std::vector<geometry_msgs::Point> footprint;
-        visualization_msgs::Marker obstacle_marker;
+        std::vector<geometry_msgs::msg::Point> footprint;
+        visualization_msgs::msg::Marker obstacle_marker;
 
         if (!config.check_obstacles)
         {
@@ -602,7 +769,7 @@ namespace ftc_local_planner
         // maximal costs
         unsigned char previous_cost = 255;
         // ensure look ahead not out of plan
-        if (global_plan.size() < max_points)
+        if (global_plan.size() < static_cast<size_t>(max_points))
         {
             max_points = global_plan.size();
         }
@@ -610,27 +777,28 @@ namespace ftc_local_planner
         // calculate cost of footprint at robots actual pose
         if (config.obstacle_footprint)
         {
-        costmap->getOrientedFootprint(footprint);
-        for (int i = 0; i < footprint.size(); i++)
-        {
-            // check cost of each point of footprint
-            if (costmap_map_->worldToMap(footprint[i].x, footprint[i].y, x, y))
+            footprint = costmap->getRobotFootprint();
+            for (size_t i = 0; i < footprint.size(); i++)
             {
-                unsigned char costs = costmap_map_->getCost(x, y);
-                if (costs >= costmap_2d::LETHAL_OBSTACLE)
+                // check cost of each point of footprint
+                if (costmap_map_->worldToMap(footprint[i].x, footprint[i].y, x, y))
                 {
-                    ROS_WARN("FTCLocalPlannerROS: Possible collision of footprint at actual pose. Stop local planner.");
-                    return true;
+                    unsigned char costs = costmap_map_->getCost(x, y);
+                    if (costs >= nav2_costmap_2d::LETHAL_OBSTACLE)
+                    {
+                        RCLCPP_WARN(node_->get_logger(),
+                            "FTCLocalPlannerROS: Possible collision of footprint at actual pose. Stop local planner.");
+                        return true;
+                    }
                 }
             }
-        }
         }
 
         for (int i = 0; i < max_points; i++)
         {
-            geometry_msgs::PoseStamped x_pose;
+            geometry_msgs::msg::PoseStamped x_pose;
             int index = current_index + i;
-            if (index > global_plan.size())
+            if (index > static_cast<int>(global_plan.size()))
             {
                 index = global_plan.size();
             }
@@ -643,13 +811,14 @@ namespace ftc_local_planner
                 {
                     debugObstacle(obstacle_marker, x, y, costs, max_points);
                 }
-                // Near at obstacel
+                // Near at obstacle
                 if (costs > 0)
                 {
                     // Possible collision
                     if (costs > 127 && costs > previous_cost)
                     {
-                        ROS_WARN("FTCLocalPlannerROS: Possible collision. Stop local planner.");
+                        RCLCPP_WARN(node_->get_logger(),
+                            "FTCLocalPlannerROS: Possible collision. Stop local planner.");
                         return true;
                     }
                 }
@@ -659,62 +828,63 @@ namespace ftc_local_planner
         return false;
     }
 
-    bool FTCPlanner::checkOscillation(geometry_msgs::TwistStamped &cmd_vel)
+    bool FTCPlanner::checkOscillation(geometry_msgs::msg::TwistStamped &cmd_vel)
     {
         bool oscillating = false;
         // detect and resolve oscillations
         if (config.oscillation_recovery)
         {
-            // oscillating = true;
             double max_vel_theta = config.max_cmd_vel_ang;
-            double max_vel_current = config.max_cmd_vel_speed;
 
             failure_detector_.update(cmd_vel, config.max_cmd_vel_speed, config.max_cmd_vel_speed, max_vel_theta,
                                      config.oscillation_v_eps, config.oscillation_omega_eps);
 
             oscillating = failure_detector_.isOscillating();
 
-            if (oscillating) // we are currently oscillating
+            if (oscillating)
             {
-                if (!oscillation_detected_) // do we already know that robot oscillates?
+                if (!oscillation_detected_)
                 {
-                    time_last_oscillation_ = ros::Time::now(); // save time when oscillation was detected
+                    time_last_oscillation_ = node_->now();
                     oscillation_detected_ = true;
                 }
                 // calculate duration of actual oscillation
-                bool oscillation_duration_timeout = !((ros::Time::now() - time_last_oscillation_).toSec() < config.oscillation_recovery_min_duration); // check how long we oscillate
+                bool oscillation_duration_timeout =
+                    !((node_->now() - time_last_oscillation_).seconds() < config.oscillation_recovery_min_duration);
                 if (oscillation_duration_timeout)
                 {
-                    if (!oscillation_warning_) // ensure to send warning just once instead of spamming around
+                    if (!oscillation_warning_)
                     {
-                        ROS_WARN("FTCLocalPlannerROS: possible oscillation (of the robot or its local plan) detected. Activating recovery strategy (prefer current turning direction during optimization).");
+                        RCLCPP_WARN(node_->get_logger(),
+                            "FTCLocalPlannerROS: possible oscillation (of the robot or its local plan) detected. "
+                            "Activating recovery strategy (prefer current turning direction during optimization).");
                         oscillation_warning_ = true;
                     }
                     return true;
                 }
-                return false; // oscillating but timeout not reached
+                return false;
             }
             else
             {
-                // not oscillating
-                time_last_oscillation_ = ros::Time::now(); // save time when oscillation was detected
+                time_last_oscillation_ = node_->now();
                 oscillation_detected_ = false;
                 oscillation_warning_ = false;
                 return false;
             }
         }
-        return false; // no check for oscillation
+        return false;
     }
 
-    void FTCPlanner::debugObstacle(visualization_msgs::Marker &obstacle_points, double x, double y, unsigned char cost, int maxIDs)
+    void FTCPlanner::debugObstacle(visualization_msgs::msg::Marker &obstacle_points, double x, double y,
+                                   unsigned char cost, int maxIDs)
     {
         if (obstacle_points.points.empty())
         {
             obstacle_points.header.frame_id = costmap->getGlobalFrameID();
-            obstacle_points.header.stamp = ros::Time::now();
-            obstacle_points.action = visualization_msgs::Marker::ADD;
+            obstacle_points.header.stamp = node_->now();
+            obstacle_points.action = visualization_msgs::msg::Marker::ADD;
             obstacle_points.pose.orientation.w = 1.0;
-            obstacle_points.type = visualization_msgs::Marker::POINTS;
+            obstacle_points.type = visualization_msgs::msg::Marker::POINTS;
             obstacle_points.scale.x = 0.2;
             obstacle_points.scale.y = 0.2;
         }
@@ -730,14 +900,14 @@ namespace ftc_local_planner
             obstacle_points.color.r = 1.0f;
         }
         obstacle_points.color.a = 1.0;
-        geometry_msgs::Point p;
+        geometry_msgs::msg::Point p;
         costmap_map_->mapToWorld(x, y, p.x, p.y);
         p.z = 0;
 
         obstacle_points.points.push_back(p);
-        if (obstacle_points.points.size() >= maxIDs || cost > 0)
+        if (obstacle_points.points.size() >= static_cast<size_t>(maxIDs) || cost > 0)
         {
-            obstacle_marker_pub.publish(obstacle_points);
+            obstacle_marker_pub->publish(obstacle_points);
             obstacle_points.points.clear();
         }
     }

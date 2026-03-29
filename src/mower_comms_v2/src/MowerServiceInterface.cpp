@@ -11,7 +11,7 @@ void MowerServiceInterface::Tick() {
 void MowerServiceInterface::SetMowerEnabled(bool enabled) {
   SendMowerEnabled(enabled);
   status_msg_.mow_enabled = enabled;
-  status_publisher_.publish(status_msg_);
+  status_publisher_->publish(status_msg_);
 }
 
 void MowerServiceInterface::OnMowerStatusChanged(const uint8_t& new_value) {
@@ -48,9 +48,9 @@ void MowerServiceInterface::OnServiceConnected(uint16_t service_id) {
 }
 
 void MowerServiceInterface::OnTransactionStart(uint64_t timestamp) {
-  status_msg_.stamp = ros::Time::now();
+  status_msg_.stamp = node_->get_clock()->now();
 }
 
 void MowerServiceInterface::OnTransactionEnd() {
-  status_publisher_.publish(status_msg_);
+  status_publisher_->publish(status_msg_);
 }

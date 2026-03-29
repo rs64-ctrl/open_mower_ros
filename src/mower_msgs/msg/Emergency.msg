@@ -1,4 +1,4 @@
-time stamp
+builtin_interfaces/Time stamp
 bool active_emergency
 bool latched_emergency
 string reason

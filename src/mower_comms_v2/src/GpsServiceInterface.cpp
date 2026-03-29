@@ -3,41 +3,44 @@
 //
 
 #include "GpsServiceInterface.h"
-
-#include <nmea_msgs/Sentence.h>
+#include "roslog_compat.hpp"
 
 #include <boost/algorithm/string.hpp>
 #include <boost/date_time/posix_time/posix_time.hpp>
 #include <boost/date_time/posix_time/posix_time_io.hpp>
 
 #include "GeographicLib/DMS.hpp"
-#include "robot_localization/navsat_conversions.h"
+#include "robot_localization/navsat_conversions.hpp"
 
 GpsServiceInterface::GpsServiceInterface(uint16_t service_id, const xbot::serviceif::Context& ctx,
-                                         const ros::Publisher& absolute_pose_publisher,
-                                         const ros::Publisher& nmea_publisher, double datum_lat, double datum_long,
+                                         const rclcpp::Publisher<xbot_msgs::msg::AbsolutePose>::SharedPtr& absolute_pose_publisher,
+                                         const rclcpp::Publisher<nmea_msgs::msg::Sentence>::SharedPtr& nmea_publisher,
+                                         double datum_lat, double datum_long,
                                          double datum_height, uint32_t baud_rate, const std::string& protocol,
-                                         uint8_t port_index, bool absolute_coords)
+                                         uint8_t port_index, bool absolute_coords,
+                                         const rclcpp::Node::SharedPtr& node)
     : GpsServiceInterfaceBase(service_id, ctx),
+      node_(node),
       absolute_pose_publisher_(absolute_pose_publisher),
       nmea_publisher_(nmea_publisher),
       baud_rate_(baud_rate),
       protocol_(protocol),
       port_index_(port_index),
       absolute_coords_(absolute_coords) {
-  RobotLocalization::NavsatConversions::LLtoUTM(datum_lat, datum_long, datum_n_, datum_e_, datum_zone_);
+  robot_localization::navsat_conversions::LLtoUTM(datum_lat, datum_long, datum_n_, datum_e_, datum_zone_);
   datum_u_ = datum_height;
 }
 
 void GpsServiceInterface::SendNMEA(double lat_in, double lon_in) {
   using namespace GeographicLib;
   // only send every 10 seconds, this will be more than needed
-  static ros::Time last_vrs_feedback(0.0);
-  static nmea_msgs::Sentence vrs_msg{};
-  if ((ros::Time::now() - last_vrs_feedback).toSec() < 10.0) {
+  static rclcpp::Time last_vrs_feedback(0, 0, RCL_ROS_TIME);
+  static nmea_msgs::msg::Sentence vrs_msg{};
+  const auto now = node_->get_clock()->now();
+  if ((now - last_vrs_feedback).seconds() < 10.0) {
     return;
   }
-  last_vrs_feedback = ros::Time::now();
+  last_vrs_feedback = now;
 
   auto lat = GeographicLib::DMS::Encode(lat_in, GeographicLib::DMS::component::MINUTE, 4,
                                         GeographicLib::DMS::flag::LATITUDE, ';');
@@ -55,7 +58,10 @@ void GpsServiceInterface::SendNMEA(double lat_in, double lon_in) {
   auto time_facet = new boost::posix_time::time_facet("%H%M%s");
 
   message_ss.imbue(std::locale(message_ss.getloc(), time_facet));
-  message_ss << "GPGGA," << ros::Time::now().toBoost() << "," << lat.substr(0, lat.length() - 1) << ","
+
+  // Use system clock for UTC time formatting instead of ros::Time::now().toBoost()
+  auto sys_now = boost::posix_time::microsec_clock::universal_time();
+  message_ss << "GPGGA," << sys_now << "," << lat.substr(0, lat.length() - 1) << ","
              << lat_hemisphere << "," << lon.substr(0, lon.length() - 1) << "," << lon_hemisphere
              << ",1,0,0,0,M,0,M,0000,";
 
@@ -71,10 +77,9 @@ void GpsServiceInterface::SendNMEA(double lat_in, double lon_in) {
                    << (int)checksum;
 
   vrs_msg.header.frame_id = "gps";
-  vrs_msg.header.seq++;
-  vrs_msg.header.stamp = ros::Time::now();
+  vrs_msg.header.stamp = now;
   vrs_msg.sentence = final_message_ss.str();
-  nmea_publisher_.publish(vrs_msg);
+  nmea_publisher_->publish(vrs_msg);
 }
 
 bool GpsServiceInterface::OnConfigurationRequested(uint16_t service_id) {
@@ -96,8 +101,7 @@ bool GpsServiceInterface::OnConfigurationRequested(uint16_t service_id) {
 
 void GpsServiceInterface::OnTransactionStart(uint64_t timestamp) {
   pose_msg_.header.frame_id = "gps";
-  pose_msg_.header.stamp = ros::Time::now();
-  pose_msg_.header.seq++;
+  pose_msg_.header.stamp = node_->get_clock()->now();
   pose_msg_.motion_vector_valid = false;
   pose_msg_.orientation_valid = false;
   pose_msg_.sensor_stamp = timestamp / 1000;
@@ -113,7 +117,7 @@ void GpsServiceInterface::OnPositionChanged(const double* new_value, uint32_t le
     SendNMEA(new_value[0], new_value[1]);
     double e, n;
     std::string zone;
-    RobotLocalization::NavsatConversions::LLtoUTM(new_value[0], new_value[1], n, e, zone);
+    robot_localization::navsat_conversions::LLtoUTM(new_value[0], new_value[1], n, e, zone);
     pose_msg_.pose.pose.position.x = e - datum_e_;
     pose_msg_.pose.pose.position.y = n - datum_n_;
     pose_msg_.pose.pose.position.z = new_value[2] - datum_u_;
@@ -121,7 +125,7 @@ void GpsServiceInterface::OnPositionChanged(const double* new_value, uint32_t le
     double n = new_value[1] + datum_n_;
     double e = new_value[0] + datum_e_;
     double lat, lng;
-    RobotLocalization::NavsatConversions::UTMtoLL(n, e, datum_zone_, lat, lng);
+    robot_localization::navsat_conversions::UTMtoLL(n, e, datum_zone_, lat, lng);
     SendNMEA(lat, lng);
     pose_msg_.pose.pose.position.x = new_value[0];
     pose_msg_.pose.pose.position.y = new_value[1];
@@ -134,12 +138,12 @@ void GpsServiceInterface::OnPositionHorizontalAccuracyChanged(const double& new_
 }
 
 void GpsServiceInterface::OnFixTypeChanged(const char* new_value, uint32_t length) {
-  pose_msg_.flags |= xbot_msgs::AbsolutePose::FLAG_GPS_RTK;
+  pose_msg_.flags |= xbot_msgs::msg::AbsolutePose::FLAG_GPS_RTK;
   std::string type(new_value, length);
   if (type == "FIX") {
-    pose_msg_.flags |= xbot_msgs::AbsolutePose::FLAG_GPS_RTK_FIXED;
+    pose_msg_.flags |= xbot_msgs::msg::AbsolutePose::FLAG_GPS_RTK_FIXED;
   } else if (type == "FLOAT") {
-    pose_msg_.flags |= xbot_msgs::AbsolutePose::FLAG_GPS_RTK_FLOAT;
+    pose_msg_.flags |= xbot_msgs::msg::AbsolutePose::FLAG_GPS_RTK_FLOAT;
   }
 }
 
@@ -174,5 +178,5 @@ void GpsServiceInterface::OnVehicleHeadingAndAccuracyChanged(const double* new_v
 }
 
 void GpsServiceInterface::OnTransactionEnd() {
-  absolute_pose_publisher_.publish(pose_msg_);
+  absolute_pose_publisher_->publish(pose_msg_);
 }

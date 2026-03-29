@@ -5,21 +5,23 @@
 #ifndef DIFFDRIVESERVICEINTERFACE_H
 #define DIFFDRIVESERVICEINTERFACE_H
 
-#include <geometry_msgs/Twist.h>
-#include <mower_msgs/ESCStatus.h>
-#include <mower_msgs/EmergencyStopSrv.h>
-#include <ros/ros.h>
+#include <rclcpp/rclcpp.hpp>
+#include <geometry_msgs/msg/twist.hpp>
+#include <geometry_msgs/msg/twist_stamped.hpp>
+#include <mower_msgs/msg/esc_status.hpp>
 
 #include <DiffDriveServiceInterfaceBase.hpp>
 
 class DiffDriveServiceInterface : public DiffDriveServiceInterfaceBase {
  public:
   DiffDriveServiceInterface(uint16_t service_id, const xbot::serviceif::Context& ctx,
-                            const ros::Publisher& actual_twist_publisher,
-                            const ros::Publisher& left_esc_status_publisher,
-                            const ros::Publisher& right_esc_status_publisher, double ticks_per_meter,
-                            double wheel_distance)
+                            const rclcpp::Node::SharedPtr& node,
+                            const rclcpp::Publisher<geometry_msgs::msg::TwistStamped>::SharedPtr& actual_twist_publisher,
+                            const rclcpp::Publisher<mower_msgs::msg::ESCStatus>::SharedPtr& left_esc_status_publisher,
+                            const rclcpp::Publisher<mower_msgs::msg::ESCStatus>::SharedPtr& right_esc_status_publisher,
+                            double ticks_per_meter, double wheel_distance)
       : DiffDriveServiceInterfaceBase(service_id, ctx),
+        node_(node),
         actual_twist_publisher_(actual_twist_publisher),
         left_esc_status_publisher_(left_esc_status_publisher),
         right_esc_status_publisher_(right_esc_status_publisher),
@@ -30,10 +32,10 @@ class DiffDriveServiceInterface : public DiffDriveServiceInterfaceBase {
   bool OnConfigurationRequested(uint16_t service_id) override;
 
   /**
-   * Convenience function to transmit the twist from a ROS message
-   * @param msg The ROS message
+   * Convenience function to transmit the twist from a ROS2 message
+   * @param msg The ROS2 message
    */
-  void SendTwist(const geometry_msgs::TwistConstPtr& msg);
+  void SendTwist(const geometry_msgs::msg::Twist::ConstSharedPtr& msg);
 
  protected:
   /**
@@ -56,20 +58,19 @@ class DiffDriveServiceInterface : public DiffDriveServiceInterfaceBase {
   void OnServiceDisconnected(uint16_t service_id) override;
 
  private:
-  // Store the seq number for the actual twist message
-  uint32_t seq = 0;
   std::mutex state_mutex_{};
+  rclcpp::Node::SharedPtr node_;
 
- public:
-  const ros::Publisher& actual_twist_publisher_;
-  const ros::Publisher& left_esc_status_publisher_;
-  const ros::Publisher& right_esc_status_publisher_;
+  rclcpp::Publisher<geometry_msgs::msg::TwistStamped>::SharedPtr actual_twist_publisher_;
+  rclcpp::Publisher<mower_msgs::msg::ESCStatus>::SharedPtr left_esc_status_publisher_;
+  rclcpp::Publisher<mower_msgs::msg::ESCStatus>::SharedPtr right_esc_status_publisher_;
+
   double wheel_distance_;
   double ticks_per_meter_;
 
   // Store the latest ESC state
-  mower_msgs::ESCStatus left_esc_state_{};
-  mower_msgs::ESCStatus right_esc_state_{};
+  mower_msgs::msg::ESCStatus left_esc_state_{};
+  mower_msgs::msg::ESCStatus right_esc_state_{};
 };
 
 #endif  // DIFFDRIVESERVICEINTERFACE_H

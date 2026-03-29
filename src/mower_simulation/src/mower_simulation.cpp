@@ -12,23 +12,21 @@
 // You should have received a copy of the GNU General Public License along with OpenMower. If not, see
 // <https://www.gnu.org/licenses/>.
 //
-#include "ros/ros.h"
+#include <rclcpp/rclcpp.hpp>
 
 // Include messages for mower control
-#include <mower_msgs/ESCStatus.h>
-#include <mower_msgs/Emergency.h>
-#include <mower_msgs/Power.h>
+#include <mower_msgs/msg/esc_status.hpp>
+#include <mower_msgs/msg/emergency.hpp>
+#include <mower_msgs/msg/power.hpp>
 #include <tf2/LinearMath/Quaternion.h>
-#include <tf2_geometry_msgs/tf2_geometry_msgs.h>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 
 #include <xbot-service/Io.hpp>
 #include <xbot-service/portable/system.hpp>
 
 #include "../../../services/service_ids.h"
 #include "SimRobot.h"
-#include "dynamic_reconfigure/server.h"
-#include "mower_map/GetDockingPointSrv.h"
-#include "mower_simulation/MowerSimulationConfig.h"
+#include "mower_map/srv/get_docking_point_srv.hpp"
 #include "services/diff_drive_service/diff_drive_service.hpp"
 #include "services/emergency_service/emergency_service.hpp"
 #include "services/gps_service/gps_service.hpp"
@@ -36,36 +34,37 @@
 #include "services/mower_service/mower_service.hpp"
 #include "services/power_service/power_service.hpp"
 
-ros::Publisher status_pub;
-ros::Publisher cmd_vel_pub;
-ros::Publisher pose_pub;
-ros::Publisher initial_pose_publisher;
-ros::ServiceClient docking_point_client;
-
-dynamic_reconfigure::Server<mower_simulation::MowerSimulationConfig>* reconfig_server;
-
 int main(int argc, char** argv) {
-  ros::init(argc, argv, "mower_simulation");
+  rclcpp::init(argc, argv);
 
-  ros::NodeHandle n;
-  ros::NodeHandle paramNh("~");
+  auto node = std::make_shared<rclcpp::Node>("mower_simulation");
 
-  reconfig_server = new dynamic_reconfigure::Server<mower_simulation::MowerSimulationConfig>(paramNh);
-  // reconfig_server->setCallback(reconfigureCB);
+  // Declare parameters that were previously in dynamic_reconfigure
+  node->declare_parameter<double>("battery_voltage", 28.0);
+  node->declare_parameter<double>("temperature_mower", 40.0);
+  node->declare_parameter<bool>("is_charging", false);
+  node->declare_parameter<bool>("mower_error", false);
+  node->declare_parameter<bool>("mower_running", false);
+  node->declare_parameter<bool>("wheels_stalled", false);
+  node->declare_parameter<bool>("emergency_stop", false);
+  node->declare_parameter<bool>("rain", false);
 
-  docking_point_client = n.serviceClient<mower_map::GetDockingPointSrv>("mower_map_service/get_docking_point");
+  auto docking_point_client = node->create_client<mower_map::srv::GetDockingPointSrv>(
+      "mower_map_service/get_docking_point");
 
   xbot::service::system::initSystem();
   xbot::service::Io::start();
 
-  SimRobot robot{paramNh};
+  SimRobot robot{node};
 
   // Move the robot to the docking station.
   // TODO: Use a better way to make sure that the docking position is loaded.
-  sleep(3);
-  mower_map::GetDockingPointSrv get_docking_point_srv;
-  if (docking_point_client.call(get_docking_point_srv)) {
-    const auto& docking_pose = get_docking_point_srv.response.docking_pose;
+  rclcpp::sleep_for(std::chrono::seconds(3));
+  auto request = std::make_shared<mower_map::srv::GetDockingPointSrv::Request>();
+  auto future = docking_point_client->async_send_request(request);
+  if (rclcpp::spin_until_future_complete(node, future, std::chrono::seconds(5)) == rclcpp::FutureReturnCode::SUCCESS) {
+    const auto& response = future.get();
+    const auto& docking_pose = response->docking_pose;
     tf2::Quaternion quat;
     tf2::fromMsg(docking_pose.orientation, quat);
     tf2::Matrix3x3 m(quat);
@@ -91,7 +90,7 @@ int main(int argc, char** argv) {
 
   robot.Start();
 
-  ros::spin();
-  delete (reconfig_server);
+  rclcpp::spin(node);
+  rclcpp::shutdown();
   return 0;
 }

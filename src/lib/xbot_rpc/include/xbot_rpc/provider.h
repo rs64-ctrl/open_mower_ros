@@ -1,9 +1,10 @@
 #pragma once
 
-#include <ros/ros.h>
-#include <xbot_rpc/RpcError.h>
-#include <xbot_rpc/RpcRequest.h>
-#include <xbot_rpc/RpcResponse.h>
+#include <rclcpp/rclcpp.hpp>
+#include <xbot_rpc/msg/rpc_error.hpp>
+#include <xbot_rpc/msg/rpc_request.hpp>
+#include <xbot_rpc/msg/rpc_response.hpp>
+#include <xbot_rpc/srv/register_methods_srv.hpp>
 #include <xbot_rpc/constants.h>
 
 #include <nlohmann/json.hpp>
@@ -33,18 +34,20 @@ class RpcProvider {
  private:
   std::string node_id;
   std::map<std::string, callback_t> methods;
+  rclcpp::Node::SharedPtr node_;
 
-  ros::Subscriber request_sub;
-  ros::Publisher response_pub;
-  ros::Publisher error_pub;
-  ros::ServiceClient registration_client;
+  rclcpp::Subscription<xbot_rpc::msg::RpcRequest>::SharedPtr request_sub;
+  rclcpp::Publisher<xbot_rpc::msg::RpcResponse>::SharedPtr response_pub;
+  rclcpp::Publisher<xbot_rpc::msg::RpcError>::SharedPtr error_pub;
+  rclcpp::Client<xbot_rpc::srv::RegisterMethodsSrv>::SharedPtr registration_client;
 
-  void handleRequest(const xbot_rpc::RpcRequest::ConstPtr& request);
-  void publishResponse(const xbot_rpc::RpcRequest::ConstPtr& request, const nlohmann::basic_json<>& response);
-  void publishError(const xbot_rpc::RpcRequest::ConstPtr& request, int16_t code, const std::string& message);
+  void handleRequest(const xbot_rpc::msg::RpcRequest::SharedPtr request);
+  void publishResponse(const xbot_rpc::msg::RpcRequest::SharedPtr& request, const nlohmann::basic_json<>& response);
+  void publishError(const xbot_rpc::msg::RpcRequest::SharedPtr& request, int16_t code, const std::string& message);
 
  public:
-  RpcProvider(const std::string& node_id, const std::map<std::string, callback_t>& methods = {}) : node_id(node_id), methods(methods) {}
+  RpcProvider(rclcpp::Node::SharedPtr node, const std::string& node_id, const std::map<std::string, callback_t>& methods = {})
+      : node_id(node_id), methods(methods), node_(node) {}
 
   void init();
 

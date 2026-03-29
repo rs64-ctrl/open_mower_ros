@@ -15,21 +15,20 @@
 #ifndef SRC_IDLEBEHAVIOR_H
 #define SRC_IDLEBEHAVIOR_H
 
-#include <dynamic_reconfigure/server.h>
-#include <mower_map/GetDockingPointSrv.h>
+#include <mower_map/srv/get_docking_point_srv.hpp>
 
 #include "AreaRecordingBehavior.h"
 #include "Behavior.h"
 #include "UndockingBehavior.h"
-#include "mower_map/GetMowingAreaSrv.h"
-#include "xbot_msgs/ActionInfo.h"
+#include "mower_map/srv/get_mowing_area_srv.hpp"
+#include "xbot_msgs/msg/action_info.hpp"
 
 class IdleBehavior : public Behavior {
  private:
   bool stay_docked = false;
   bool manual_start_mowing = false;
   bool start_area_recorder = false;
-  std::vector<xbot_msgs::ActionInfo> actions;
+  std::vector<xbot_msgs::msg::ActionInfo> actions;
 
  public:
   IdleBehavior(bool stayDocked);

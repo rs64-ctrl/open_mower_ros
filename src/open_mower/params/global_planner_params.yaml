@@ -1,2 +1,4 @@
-GlobalPlanner:
-  orientation_mode: 1
+/**:
+  ros__parameters:
+    GlobalPlanner:
+      orientation_mode: 1

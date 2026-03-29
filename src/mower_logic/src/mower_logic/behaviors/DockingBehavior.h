@@ -15,31 +15,30 @@
 #ifndef SRC_DOCKINGBEHAVIOR_H
 #define SRC_DOCKINGBEHAVIOR_H
 
-#include <actionlib/client/simple_action_client.h>
-#include <mbf_msgs/ExePathAction.h>
-#include <mbf_msgs/MoveBaseAction.h>
-#include <mower_map/GetDockingPointSrv.h>
-#include <nav_msgs/Odometry.h>
+#include <rclcpp_action/rclcpp_action.hpp>
+#include <mbf_msgs/action/exe_path.hpp>
+#include <mbf_msgs/action/move_base.hpp>
+#include <mower_map/srv/get_docking_point_srv.hpp>
+#include <nav_msgs/msg/odometry.hpp>
 #include <tf2/LinearMath/Transform.h>
 
 #include "Behavior.h"
 #include "DockingBehavior.h"
 #include "IdleBehavior.h"
-#include "mower_msgs/Status.h"
-#include "ros/ros.h"
-#include "tf2_geometry_msgs/tf2_geometry_msgs.h"
-#include "xbot_msgs/ActionInfo.h"
+#include "mower_msgs/msg/status.hpp"
+#include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
+#include "xbot_msgs/msg/action_info.hpp"
 
 class DockingBehavior : public Behavior {
  public:
   static DockingBehavior INSTANCE;
 
  private:
-  std::vector<xbot_msgs::ActionInfo> actions;
+  std::vector<xbot_msgs::msg::ActionInfo> actions;
 
   uint retryCount;
   bool inApproachMode;
-  geometry_msgs::PoseStamped docking_pose_stamped;
+  geometry_msgs::msg::PoseStamped docking_pose_stamped;
 
   bool approach_docking_point();
 

@@ -1,46 +1,43 @@
 #include "xesc_yfr4_driver/xesc_yfr4_driver.h"
 
 void xesc_yfr4_driver::XescYFR4Driver::error_func(const std::string &s) {
-    ROS_ERROR_STREAM(s);
+    RCLCPP_ERROR_STREAM(logger_, s);
 }
 
-xesc_yfr4_driver::XescYFR4Driver::XescYFR4Driver(ros::NodeHandle &nh, ros::NodeHandle &private_nh) {
-    ROS_INFO_STREAM("Starting xesc YardForce R4 adapter driver");
+xesc_yfr4_driver::XescYFR4Driver::XescYFR4Driver(rclcpp::Node::SharedPtr node)
+    : node_(node), logger_(node->get_logger()) {
+    RCLCPP_INFO_STREAM(logger_, "Starting xesc YardForce R4 adapter driver");
 
-    xesc_interface = new xesc_yfr4_driver::XescYFR4Interface(boost::bind(&XescYFR4Driver::error_func, this, boost::placeholders::_1));
+    xesc_interface = new xesc_yfr4_driver::XescYFR4Interface(std::bind(&XescYFR4Driver::error_func, this, std::placeholders::_1));
 
     float motor_current_limit;
     float min_pcb_temp;
     float max_pcb_temp;
     std::string serial_port;
 
-    if (!private_nh.getParam("serial_port", serial_port)) {
-        ROS_ERROR_STREAM("You need to provide parameter serial_port.");
-        throw ros::InvalidParameterException("You need to provide parameter serial_port.");
+    serial_port = node->declare_parameter<std::string>("serial_port", "");
+    if (serial_port.empty()) {
+        RCLCPP_ERROR_STREAM(logger_, "You need to provide parameter serial_port.");
+        throw std::runtime_error("You need to provide parameter serial_port.");
     }
-    if (!private_nh.getParam("motor_current_limit", motor_current_limit)) {
-        ROS_ERROR_STREAM("You need to provide parameter motor_current_limit");
-        throw ros::InvalidParameterException("You need to provide parameter motor_current_limit");
+    motor_current_limit = node->declare_parameter<double>("motor_current_limit", -1.0);
+    if (motor_current_limit < 0.0) {
+        RCLCPP_ERROR_STREAM(logger_, "You need to provide parameter motor_current_limit");
+        throw std::runtime_error("You need to provide parameter motor_current_limit");
     }
-    if (!private_nh.getParam("min_pcb_temp", min_pcb_temp)) {
-        ROS_ERROR_STREAM("You need to provide parameter min_pcb_temp");
-        throw ros::InvalidParameterException("You need to provide parameter min_pcb_temp");
-    }
-    if (!private_nh.getParam("max_pcb_temp", max_pcb_temp)) {
-        ROS_ERROR_STREAM("You need to provide parameter max_pcb_temp");
-        throw ros::InvalidParameterException("You need to provide parameter max_pcb_temp");
-    }
+    min_pcb_temp = node->declare_parameter<double>("min_pcb_temp", 0.0);
+    max_pcb_temp = node->declare_parameter<double>("max_pcb_temp", 0.0);
 
     xesc_interface->update_settings(motor_current_limit, min_pcb_temp, max_pcb_temp);
-    xesc_interface->start(private_nh.param("serial_port", serial_port));
+    xesc_interface->start(serial_port);
 }
 
-void xesc_yfr4_driver::XescYFR4Driver::getStatus(xesc_msgs::XescStateStamped &state_msg) {
+void xesc_yfr4_driver::XescYFR4Driver::getStatus(xesc_msgs::msg::XescStateStamped &state_msg) {
     if (!xesc_interface)
         return;
 
     xesc_interface->get_status(&status);
-    state_msg.header.stamp = ros::Time::now();
+    state_msg.header.stamp = node_->get_clock()->now();
     state_msg.state.connection_state = status.connection_state;
     state_msg.state.fw_major = status.fw_version_major;
     state_msg.state.fw_minor = status.fw_version_minor;
@@ -54,11 +51,11 @@ void xesc_yfr4_driver::XescYFR4Driver::getStatus(xesc_msgs::XescStateStamped &st
     state_msg.state.fault_code = status.fault_code;
 }
 
-void xesc_yfr4_driver::XescYFR4Driver::getStatusBlocking(xesc_msgs::XescStateStamped &state_msg) {
+void xesc_yfr4_driver::XescYFR4Driver::getStatusBlocking(xesc_msgs::msg::XescStateStamped &state_msg) {
     if (!xesc_interface)
         return;
     xesc_interface->wait_for_status(&status);
-    state_msg.header.stamp = ros::Time::now();
+    state_msg.header.stamp = node_->get_clock()->now();
     state_msg.state.connection_state = status.connection_state;
     state_msg.state.fw_major = status.fw_version_major;
     state_msg.state.fw_minor = status.fw_version_minor;
@@ -73,7 +70,7 @@ void xesc_yfr4_driver::XescYFR4Driver::getStatusBlocking(xesc_msgs::XescStateSta
 }
 
 void xesc_yfr4_driver::XescYFR4Driver::stop() {
-    ROS_INFO_STREAM("Stopping xesc YardForce R4 adapter driver");
+    RCLCPP_INFO_STREAM(logger_, "Stopping xesc YardForce R4 adapter driver");
     xesc_interface->stop();
     delete xesc_interface;
 }

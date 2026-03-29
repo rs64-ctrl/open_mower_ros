@@ -13,19 +13,27 @@
 // You should have received a copy of the GNU General Public License along with OpenMower. If not, see
 // <https://www.gnu.org/licenses/>.
 //
-#include <dynamic_reconfigure/client.h>
-#include <geometry_msgs/Twist.h>
-#include <geometry_msgs/TwistStamped.h>
-#include <mower_logic/PowerConfig.h>
-#include <mower_msgs/ESCStatus.h>
-#include <mower_msgs/Emergency.h>
-#include <mower_msgs/Power.h>
-#include <mower_msgs/Status.h>
-#include <sensor_msgs/Joy.h>
-#include <serial/serial.h>
-#include <xbot_msgs/WheelTick.h>
+#include "roslog_compat.hpp"
+
+#include <geometry_msgs/msg/twist.hpp>
+#include <geometry_msgs/msg/twist_stamped.hpp>
+#include <mower_msgs/msg/esc_status.hpp>
+#include <mower_msgs/msg/emergency.hpp>
+#include <mower_msgs/msg/high_level_status.hpp>
+#include <mower_msgs/msg/imu_raw.hpp>
+#include <mower_msgs/msg/power.hpp>
+#include <mower_msgs/msg/status.hpp>
+#include <sensor_msgs/msg/imu.hpp>
+#include <sensor_msgs/msg/joy.hpp>
+#include <sensor_msgs/msg/magnetic_field.hpp>
+#include <std_msgs/msg/bool.hpp>
+#include <std_msgs/msg/empty.hpp>
+#include <xbot_msgs/msg/wheel_tick.hpp>
+#include <xesc_msgs/msg/xesc_state.hpp>
+#include <xesc_msgs/msg/xesc_state_stamped.hpp>
 #include <xesc_driver/xesc_driver.h>
-#include <xesc_msgs/XescStateStamped.h>
+
+#include <serial/serial.h>
 
 #include <algorithm>
 #include <bitset>
@@ -33,25 +41,23 @@
 #include "COBS.h"
 #include "boost/crc.hpp"
 #include "ll_datatypes.h"
-#include "mower_logic/MowerLogicConfig.h"
-#include "mower_msgs/EmergencyStopSrv.h"
-#include "mower_msgs/HighLevelControlSrv.h"
-#include "mower_msgs/HighLevelStatus.h"
-#include "mower_msgs/ImuRaw.h"
-#include "mower_msgs/MowerControlSrv.h"
-#include "ros/ros.h"
-#include "sensor_msgs/Imu.h"
-#include "sensor_msgs/MagneticField.h"
-#include "std_msgs/Bool.h"
-#include "std_msgs/Empty.h"
 
-ros::Publisher status_pub;
-ros::Publisher power_pub;
-ros::Publisher emergency_pub;
-ros::Publisher actual_twist_pub;
-ros::Publisher status_left_esc_pub;
-ros::Publisher status_right_esc_pub;
-ros::Publisher sensor_imu_pub;
+#include <mower_msgs/srv/emergency_stop_srv.hpp>
+#include <mower_msgs/srv/high_level_control_srv.hpp>
+#include <mower_msgs/srv/mower_control_srv.hpp>
+
+using namespace std::chrono_literals;
+
+// Forward declarations
+static rclcpp::Node::SharedPtr g_node;
+
+rclcpp::Publisher<mower_msgs::msg::Status>::SharedPtr status_pub;
+rclcpp::Publisher<mower_msgs::msg::Power>::SharedPtr power_pub;
+rclcpp::Publisher<mower_msgs::msg::Emergency>::SharedPtr emergency_pub;
+rclcpp::Publisher<geometry_msgs::msg::TwistStamped>::SharedPtr actual_twist_pub;
+rclcpp::Publisher<mower_msgs::msg::ESCStatus>::SharedPtr status_left_esc_pub;
+rclcpp::Publisher<mower_msgs::msg::ESCStatus>::SharedPtr status_right_esc_pub;
+rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr sensor_imu_pub;
 
 COBS cobs;
 
@@ -78,19 +84,35 @@ double wheel_distance_m = 0.0;
 // LL/HL configuration
 struct ll_high_level_config llhl_config;
 
-dynamic_reconfigure::Client<mower_logic::MowerLogicConfig>* reconfigClient;
-dynamic_reconfigure::Client<ll::PowerConfig>* powerReconfigClient;
-mower_logic::MowerLogicConfig mower_logic_config;
-ll::PowerConfig power_config;
+// Dynamic reconfigure replaced by ROS2 parameters.
+// Struct to hold the mower_logic config values locally.
+struct MowerLogicParams {
+  int cu_rain_threshold = 0xffff;
+  int emergency_lift_period = 0xffff;
+  int emergency_tilt_period = 0xffff;
+  int shutdown_esc_max_pitch = 0xff;
+  std::string emergency_input_config;
+};
+
+struct PowerParams {
+  double charge_critical_high_voltage = 0.0;
+  double charge_critical_high_current = 0.0;
+  double battery_critical_high_voltage = 0.0;
+  double battery_empty_voltage = 0.0;
+  double battery_full_voltage = 0.0;
+};
+
+MowerLogicParams mower_logic_config;
+PowerParams power_config;
 
 // Serial port and buffer for the low level connection
 serial::Serial serial_port;
 uint8_t out_buf[1000];
-ros::Time last_cmd_vel(0.0);
+rclcpp::Time last_cmd_vel;
 
 boost::crc_ccitt_type crc;
 
-mower_msgs::HighLevelStatus last_high_level_status;
+mower_msgs::msg::HighLevelStatus last_high_level_status;
 
 xesc_driver::XescDriver* mow_xesc_interface;
 xesc_driver::XescDriver* left_xesc_interface;
@@ -100,15 +122,15 @@ xesc_driver::XescDriver* right_xesc_interface;
 bool has_ticks;
 uint32_t last_ticks_l = 0;
 uint32_t last_ticks_r = 0;
-ros::Time last_ticks_stamp{};
-geometry_msgs::TwistStamped measured_twist_msg{};
+rclcpp::Time last_ticks_stamp;
+geometry_msgs::msg::TwistStamped measured_twist_msg{};
 
 std::mutex ll_status_mutex;
 struct ll_status last_ll_status = {0};
 
-sensor_msgs::Imu sensor_imu_msg;
+sensor_msgs::msg::Imu sensor_imu_msg;
 
-ros::ServiceClient highLevelClient;
+rclcpp::Client<mower_msgs::srv::HighLevelControlSrv>::SharedPtr highLevelClient;
 
 bool is_emergency() {
   return emergency_high_level || emergency_low_level;
@@ -123,11 +145,12 @@ void publishActuators() {
     speed_r = 0;
     speed_mow = 0;
   }
-  if (ros::Time::now() - last_cmd_vel > ros::Duration(1.0)) {
+  auto now = g_node->get_clock()->now();
+  if ((now - last_cmd_vel).seconds() > 1.0) {
     speed_l = 0;
     speed_r = 0;
   }
-  if (ros::Time::now() - last_cmd_vel > ros::Duration(25.0)) {
+  if ((now - last_cmd_vel).seconds() > 25.0) {
     speed_l = 0;
     speed_r = 0;
     speed_mow = 0;
@@ -143,8 +166,8 @@ void publishActuators() {
 
   struct ll_heartbeat heartbeat = {.type = PACKET_ID_LL_HEARTBEAT,
                                    // If high level has emergency and LL does not know yet, we set it
-                                   .emergency_requested = (!emergency_low_level && emergency_high_level),
-                                   .emergency_release_requested = ll_clear_emergency};
+                                   .emergency_requested = static_cast<uint8_t>(!emergency_low_level && emergency_high_level),
+                                   .emergency_release_requested = static_cast<uint8_t>(ll_clear_emergency)};
 
   crc.reset();
   crc.process_bytes(&heartbeat, sizeof(struct ll_heartbeat) - 2);
@@ -163,18 +186,18 @@ void publishActuators() {
   }
 }
 
-void convertStatus(xesc_msgs::XescStateStamped& vesc_status, mower_msgs::ESCStatus& ros_esc_status) {
-  if (vesc_status.state.connection_state != xesc_msgs::XescState::XESC_CONNECTION_STATE_CONNECTED &&
-      vesc_status.state.connection_state != xesc_msgs::XescState::XESC_CONNECTION_STATE_CONNECTED_INCOMPATIBLE_FW) {
+void convertStatus(xesc_msgs::msg::XescStateStamped& vesc_status, mower_msgs::msg::ESCStatus& ros_esc_status) {
+  if (vesc_status.state.connection_state != xesc_msgs::msg::XescState::XESC_CONNECTION_STATE_CONNECTED &&
+      vesc_status.state.connection_state != xesc_msgs::msg::XescState::XESC_CONNECTION_STATE_CONNECTED_INCOMPATIBLE_FW) {
     // ESC is disconnected
-    ros_esc_status.status = mower_msgs::ESCStatus::ESC_STATUS_DISCONNECTED;
+    ros_esc_status.status = mower_msgs::msg::ESCStatus::ESC_STATUS_DISCONNECTED;
   } else if (vesc_status.state.fault_code) {
     ROS_ERROR_STREAM_THROTTLE(1, "Motor controller fault code: " << vesc_status.state.fault_code);
     // ESC has a fault
-    ros_esc_status.status = mower_msgs::ESCStatus::ESC_STATUS_ERROR;
+    ros_esc_status.status = mower_msgs::msg::ESCStatus::ESC_STATUS_ERROR;
   } else {
     // ESC is OK but standing still
-    ros_esc_status.status = mower_msgs::ESCStatus::ESC_STATUS_OK;
+    ros_esc_status.status = mower_msgs::msg::ESCStatus::ESC_STATUS_OK;
   }
   ros_esc_status.tacho = vesc_status.state.tacho;
   ros_esc_status.rpm = vesc_status.state.rpm;
@@ -183,19 +206,19 @@ void convertStatus(xesc_msgs::XescStateStamped& vesc_status, mower_msgs::ESCStat
   ros_esc_status.temperature_pcb = vesc_status.state.temperature_pcb;
 }
 
-void convertStatus(xesc_msgs::XescStateStamped& vesc_status, uint8_t& esc_status, double& esc_temperature,
+void convertStatus(xesc_msgs::msg::XescStateStamped& vesc_status, uint8_t& esc_status, double& esc_temperature,
                    double& esc_current, double& motor_temperature, double& motor_rpm) {
-  if (vesc_status.state.connection_state != xesc_msgs::XescState::XESC_CONNECTION_STATE_CONNECTED &&
-      vesc_status.state.connection_state != xesc_msgs::XescState::XESC_CONNECTION_STATE_CONNECTED_INCOMPATIBLE_FW) {
+  if (vesc_status.state.connection_state != xesc_msgs::msg::XescState::XESC_CONNECTION_STATE_CONNECTED &&
+      vesc_status.state.connection_state != xesc_msgs::msg::XescState::XESC_CONNECTION_STATE_CONNECTED_INCOMPATIBLE_FW) {
     // ESC is disconnected
-    esc_status = mower_msgs::ESCStatus::ESC_STATUS_DISCONNECTED;
+    esc_status = mower_msgs::msg::ESCStatus::ESC_STATUS_DISCONNECTED;
   } else if (vesc_status.state.fault_code) {
     ROS_ERROR_STREAM_THROTTLE(1, "Motor controller fault code: " << vesc_status.state.fault_code);
     // ESC has a fault
-    esc_status = mower_msgs::ESCStatus::ESC_STATUS_ERROR;
+    esc_status = mower_msgs::msg::ESCStatus::ESC_STATUS_ERROR;
   } else {
     // ESC is OK but standing still
-    esc_status = mower_msgs::ESCStatus::ESC_STATUS_OK;
+    esc_status = mower_msgs::msg::ESCStatus::ESC_STATUS_OK;
   }
   motor_rpm = vesc_status.state.rpm;
   esc_current = vesc_status.state.current_input;
@@ -204,15 +227,15 @@ void convertStatus(xesc_msgs::XescStateStamped& vesc_status, uint8_t& esc_status
 }
 
 void publishStatus() {
-  mower_msgs::Status status_msg;
-  status_msg.stamp = ros::Time::now();
+  mower_msgs::msg::Status status_msg;
+  status_msg.stamp = g_node->get_clock()->now();
 
   if (last_ll_status.status_bitmask & 1) {
     // LL OK, fill the message
-    status_msg.mower_status = mower_msgs::Status::MOWER_STATUS_OK;
+    status_msg.mower_status = mower_msgs::msg::Status::MOWER_STATUS_OK;
   } else {
     // LL initializing
-    status_msg.mower_status = mower_msgs::Status::MOWER_STATUS_INITIALIZING;
+    status_msg.mower_status = mower_msgs::msg::Status::MOWER_STATUS_INITIALIZING;
   }
 
   status_msg.raspberry_pi_power = (last_ll_status.status_bitmask & 0b00000010) != 0;
@@ -235,33 +258,33 @@ void publishStatus() {
   }
 
   // True, if high or low level emergency condition is present
-  mower_msgs::Emergency emergency_msg{};
+  mower_msgs::msg::Emergency emergency_msg{};
   emergency_msg.stamp = status_msg.stamp;
   emergency_msg.active_emergency = active_low_level_emergency > 0;
   emergency_msg.latched_emergency = is_emergency();
   emergency_msg.reason = "";
-  emergency_pub.publish(emergency_msg);
+  emergency_pub->publish(emergency_msg);
 
-  mower_msgs::Power power_msg{};
+  mower_msgs::msg::Power power_msg{};
   power_msg.stamp = status_msg.stamp;
   power_msg.v_battery = last_ll_status.v_system;
   power_msg.v_charge = last_ll_status.v_charge;
   power_msg.charge_current = last_ll_status.charging_current;
   power_msg.charger_enabled = (last_ll_status.status_bitmask & LL_STATUS_BIT_CHARGING) != 0;
   power_msg.charger_status = "N/A";
-  power_pub.publish(power_msg);
+  power_pub->publish(power_msg);
 
-  xesc_msgs::XescStateStamped mow_status{}, left_status{}, right_status{};
+  xesc_msgs::msg::XescStateStamped mow_status{}, left_status{}, right_status{};
   if (mow_xesc_interface) {
     mow_xesc_interface->getStatus(mow_status);
   } else {
-    mow_status.state.connection_state = xesc_msgs::XescState::XESC_CONNECTION_STATE_DISCONNECTED;
+    mow_status.state.connection_state = xesc_msgs::msg::XescState::XESC_CONNECTION_STATE_DISCONNECTED;
   }
   left_xesc_interface->getStatus(left_status);
   right_xesc_interface->getStatus(right_status);
 
-  mower_msgs::ESCStatus left_esc_status{};
-  mower_msgs::ESCStatus right_esc_status{};
+  mower_msgs::msg::ESCStatus left_esc_status{};
+  mower_msgs::msg::ESCStatus right_esc_status{};
 
   // convertStatus(mow_status, status_msg.mow_esc_status);
   convertStatus(left_status, left_esc_status);
@@ -273,9 +296,9 @@ void publishStatus() {
   status_msg.mower_esc_temperature = static_cast<float>(mow_status.state.temperature_pcb);
   status_msg.mower_motor_temperature = static_cast<float>(mow_status.state.temperature_motor);
 
-  status_pub.publish(status_msg);
-  status_left_esc_pub.publish(left_esc_status);
-  status_right_esc_pub.publish(right_esc_status);
+  status_pub->publish(status_msg);
+  status_left_esc_pub->publish(left_esc_status);
+  status_right_esc_pub->publish(right_esc_status);
 
   if (!has_ticks) {
     last_ticks_stamp = status_msg.stamp;
@@ -286,7 +309,7 @@ void publishStatus() {
     bool wheel_direction_l = left_status.state.direction && abs(left_status.state.duty_cycle) > 0;
     bool wheel_direction_r = !right_status.state.direction && abs(right_status.state.duty_cycle) > 0;
 
-    double dt = (status_msg.stamp - last_ticks_stamp).toSec();
+    double dt = (rclcpp::Time(status_msg.stamp) - last_ticks_stamp).seconds();
 
     double d_wheel_l = (double)(left_status.state.tacho_absolute - last_ticks_l) * (1 / wheel_ticks_per_m);
     double d_wheel_r = (double)(right_status.state.tacho_absolute - last_ticks_r) * (1 / wheel_ticks_per_m);
@@ -307,11 +330,11 @@ void publishStatus() {
 
     measured_twist_msg.header.frame_id = "base_link";
     measured_twist_msg.header.stamp = status_msg.stamp;
-    measured_twist_msg.header.seq++;
+    // ROS2: no header.seq
     measured_twist_msg.twist.linear.x = vx;
     measured_twist_msg.twist.angular.z = vr;
 
-    actual_twist_pub.publish(measured_twist_msg);
+    actual_twist_pub->publish(measured_twist_msg);
   }
 }
 
@@ -391,7 +414,7 @@ void publishLowLevelConfig(const uint8_t pkt_type) {
  * LowLevel reboots or flash period.
  */
 struct {
-  ros::Time last_config_req;    // Time when last config request was sent
+  rclcpp::Time last_config_req;    // Time when last config request was sent
   unsigned int tries_left = 0;  // Remaining request tries before giving up
 
   void ackResponse() {
@@ -407,46 +430,48 @@ struct {
   void check() {
     if (!tries_left ||                                            // No request tries left (probably old LL-FW)
         !serial_port.isOpen() || !allow_send ||                   // Serial not ready
-        ros::Time::now() - last_config_req < ros::Duration(0.5))  // Timeout waiting for response not reached
+        (g_node->get_clock()->now() - last_config_req).seconds() < 0.5)  // Timeout waiting for response not reached
       return;
     publishLowLevelConfig(PACKET_ID_LL_HIGH_LEVEL_CONFIG_REQ);
-    last_config_req = ros::Time::now();
+    last_config_req = g_node->get_clock()->now();
     tries_left--;
     ROS_WARN_STREAM_COND(
         !tries_left, "Didn't received a config packet from LowLevel in time. Is your LowLevel firmware up-to-date?");
   };
 } configTracker;
 
-void publishActuatorsTimerTask(const ros::TimerEvent& timer_event) {
+void publishActuatorsTimerTask() {
   publishActuators();
   publishStatus();
   configTracker.check();
 }
 
-bool setMowEnabled(mower_msgs::MowerControlSrvRequest& req, mower_msgs::MowerControlSrvResponse& res) {
-  if (req.mow_enabled && !is_emergency()) {
-    target_speed_mow = req.mow_direction ? 1 : -1;
+void setMowEnabled(
+    const std::shared_ptr<mower_msgs::srv::MowerControlSrv::Request> req,
+    std::shared_ptr<mower_msgs::srv::MowerControlSrv::Response> /*res*/) {
+  if (req->mow_enabled && !is_emergency()) {
+    target_speed_mow = req->mow_direction ? 1 : -1;
   } else {
     target_speed_mow = 0;
   }
   ROS_INFO_STREAM("Setting mow enabled to " << target_speed_mow);
-  return true;
 }
 
-bool setEmergencyStop(mower_msgs::EmergencyStopSrvRequest& req, mower_msgs::EmergencyStopSrvResponse& res) {
-  if (req.emergency) {
+void setEmergencyStop(
+    const std::shared_ptr<mower_msgs::srv::EmergencyStopSrv::Request> req,
+    std::shared_ptr<mower_msgs::srv::EmergencyStopSrv::Response> /*res*/) {
+  if (req->emergency) {
     ROS_ERROR_STREAM("Setting emergency!!");
     ll_clear_emergency = false;
   } else {
     ll_clear_emergency = true;
   }
   // Set the high level emergency instantly. Low level value will be set on next update.
-  emergency_high_level = req.emergency;
+  emergency_high_level = req->emergency;
   publishActuators();
-  return true;
 }
 
-void highLevelStatusReceived(const mower_msgs::HighLevelStatus::ConstPtr& msg) {
+void highLevelStatusReceived(const mower_msgs::msg::HighLevelStatus::SharedPtr msg) {
   struct ll_high_level_state hl_state = {.type = PACKET_ID_LL_HIGH_LEVEL_STATE,
                                          .current_mode = msg->state,
                                          .gps_quality = static_cast<uint8_t>(msg->gps_quality_percent * 100.0)};
@@ -468,9 +493,9 @@ void highLevelStatusReceived(const mower_msgs::HighLevelStatus::ConstPtr& msg) {
   }
 }
 
-void velReceived(const geometry_msgs::Twist::ConstPtr& msg) {
+void velReceived(const geometry_msgs::msg::Twist::SharedPtr msg) {
   // TODO: update this to rad/s values and implement xESC speed control
-  last_cmd_vel = ros::Time::now();
+  last_cmd_vel = g_node->get_clock()->now();
   speed_r = msg->linear.x + 0.5 * wheel_distance_m * msg->angular.z;
   speed_l = msg->linear.x - 0.5 * wheel_distance_m * msg->angular.z;
 
@@ -489,34 +514,34 @@ void velReceived(const geometry_msgs::Twist::ConstPtr& msg) {
 void handleLowLevelUIEvent(struct ll_ui_event* ui_event) {
   ROS_INFO_STREAM("Got UI button with code:" << +ui_event->button_id << " and duration: " << +ui_event->press_duration);
 
-  mower_msgs::HighLevelControlSrv srv;
+  auto srv_request = std::make_shared<mower_msgs::srv::HighLevelControlSrv::Request>();
 
   switch (ui_event->button_id) {
     case 2:
       // Home
-      srv.request.command = mower_msgs::HighLevelControlSrvRequest::COMMAND_HOME;
+      srv_request->command = mower_msgs::srv::HighLevelControlSrv::Request::COMMAND_HOME;
       break;
     case 3:
       // Play
-      srv.request.command = mower_msgs::HighLevelControlSrvRequest::COMMAND_START;
+      srv_request->command = mower_msgs::srv::HighLevelControlSrv::Request::COMMAND_START;
       break;
     case 4:
       // S1
-      srv.request.command = mower_msgs::HighLevelControlSrvRequest::COMMAND_S1;
+      srv_request->command = mower_msgs::srv::HighLevelControlSrv::Request::COMMAND_S1;
       break;
     case 5:
       // S2
       if (ui_event->press_duration == 2) {
-        srv.request.command = mower_msgs::HighLevelControlSrvRequest::COMMAND_DELETE_MAPS;
+        srv_request->command = mower_msgs::srv::HighLevelControlSrv::Request::COMMAND_DELETE_MAPS;
       } else {
-        srv.request.command = mower_msgs::HighLevelControlSrvRequest::COMMAND_S2;
+        srv_request->command = mower_msgs::srv::HighLevelControlSrv::Request::COMMAND_S2;
       }
       break;
     case 6:
       // LOCK
       if (ui_event->press_duration == 2) {
         // very long press on lock
-        srv.request.command = mower_msgs::HighLevelControlSrvRequest::COMMAND_RESET_EMERGENCY;
+        srv_request->command = mower_msgs::srv::HighLevelControlSrv::Request::COMMAND_RESET_EMERGENCY;
       }
       break;
     default:
@@ -524,9 +549,11 @@ void handleLowLevelUIEvent(struct ll_ui_event* ui_event) {
       return;
   }
 
-  if (!highLevelClient.call(srv)) {
-    ROS_ERROR_STREAM("Error calling high level control service");
-  }
+  // Async service call (non-blocking)
+  auto result_future = highLevelClient->async_send_request(srv_request,
+      [](rclcpp::Client<mower_msgs::srv::HighLevelControlSrv>::SharedFuture future) {
+        (void)future;  // We don't use the result
+      });
 }
 
 /**
@@ -545,9 +572,6 @@ T getNewSetChanged(const T t_cur, const T t_new, bool& changed) {
     equal = t_cur == t_new;
 
   if (!equal) changed = true;
-
-  // ROS_INFO_STREAM("DEBUG mower_comms comp. member: cur " << t_cur << " ?= " << t_new << " == equal " << equal << ",
-  // changed " << changed);
 
   return t_new;
 }
@@ -584,40 +608,53 @@ void handleLowLevelConfig(const uint8_t* buffer, const size_t size) {
   // Inform config packet tracker about the response
   configTracker.ackResponse();
 
-  // Copy received config values from LL to mower_logic's related dynamic reconfigure variables and
-  // decide if mower_logic's dynamic reconfigure need to be updated with probably changed values
+  // Copy received config values from LL to our local config params and
+  // decide if dynamic parameters need to be updated
   bool logic_config_dirty = false;
   bool power_config_dirty = false;
   // clang-format off
-  power_config.charge_critical_high_voltage = getNewSetChanged<double>(power_config.charge_critical_high_voltage, llhl_config.v_charge_cutoff, power_config_dirty);
-  power_config.charge_critical_high_current = getNewSetChanged<double>(power_config.charge_critical_high_current, llhl_config.i_charge_cutoff, power_config_dirty);
-  power_config.battery_critical_high_voltage = getNewSetChanged<double>(power_config.battery_critical_high_voltage, llhl_config.v_battery_cutoff, power_config_dirty);
-  power_config.battery_empty_voltage = getNewSetChanged<double>(power_config.battery_empty_voltage, llhl_config.v_battery_empty, power_config_dirty);
-  power_config.battery_full_voltage = getNewSetChanged<double>(power_config.battery_full_voltage, llhl_config.v_battery_full, power_config_dirty);
-  mower_logic_config.cu_rain_threshold = getNewSetChanged<int>(mower_logic_config.cu_rain_threshold, llhl_config.rain_threshold, logic_config_dirty);
-  mower_logic_config.emergency_lift_period = getNewSetChanged<int>(mower_logic_config.emergency_lift_period, llhl_config.lift_period, logic_config_dirty);
-  mower_logic_config.emergency_tilt_period = getNewSetChanged<int>(mower_logic_config.emergency_tilt_period, llhl_config.tilt_period, logic_config_dirty);
-  mower_logic_config.shutdown_esc_max_pitch = getNewSetChanged<int>(mower_logic_config.shutdown_esc_max_pitch, llhl_config.shutdown_esc_max_pitch, logic_config_dirty);
+  power_config.charge_critical_high_voltage = getNewSetChanged<double>(power_config.charge_critical_high_voltage, (double)llhl_config.v_charge_cutoff, power_config_dirty);
+  power_config.charge_critical_high_current = getNewSetChanged<double>(power_config.charge_critical_high_current, (double)llhl_config.i_charge_cutoff, power_config_dirty);
+  power_config.battery_critical_high_voltage = getNewSetChanged<double>(power_config.battery_critical_high_voltage, (double)llhl_config.v_battery_cutoff, power_config_dirty);
+  power_config.battery_empty_voltage = getNewSetChanged<double>(power_config.battery_empty_voltage, (double)llhl_config.v_battery_empty, power_config_dirty);
+  power_config.battery_full_voltage = getNewSetChanged<double>(power_config.battery_full_voltage, (double)llhl_config.v_battery_full, power_config_dirty);
+  mower_logic_config.cu_rain_threshold = getNewSetChanged<int>(mower_logic_config.cu_rain_threshold, (int)llhl_config.rain_threshold, logic_config_dirty);
+  mower_logic_config.emergency_lift_period = getNewSetChanged<int>(mower_logic_config.emergency_lift_period, (int)llhl_config.lift_period, logic_config_dirty);
+  mower_logic_config.emergency_tilt_period = getNewSetChanged<int>(mower_logic_config.emergency_tilt_period, (int)llhl_config.tilt_period, logic_config_dirty);
+  mower_logic_config.shutdown_esc_max_pitch = getNewSetChanged<int>(mower_logic_config.shutdown_esc_max_pitch, (int)llhl_config.shutdown_esc_max_pitch, logic_config_dirty);
   // clang-format on
 
-  if (logic_config_dirty) reconfigClient->setConfiguration(mower_logic_config);
-  if (power_config_dirty) powerReconfigClient->setConfiguration(power_config);
+  // In ROS2, update the node parameters so they can be read by other nodes if needed
+  if (logic_config_dirty) {
+    g_node->set_parameter(rclcpp::Parameter("mower_logic.cu_rain_threshold", mower_logic_config.cu_rain_threshold));
+    g_node->set_parameter(rclcpp::Parameter("mower_logic.emergency_lift_period", mower_logic_config.emergency_lift_period));
+    g_node->set_parameter(rclcpp::Parameter("mower_logic.emergency_tilt_period", mower_logic_config.emergency_tilt_period));
+    g_node->set_parameter(rclcpp::Parameter("mower_logic.shutdown_esc_max_pitch", mower_logic_config.shutdown_esc_max_pitch));
+  }
+  if (power_config_dirty) {
+    g_node->set_parameter(rclcpp::Parameter("services.power.charge_critical_high_voltage", power_config.charge_critical_high_voltage));
+    g_node->set_parameter(rclcpp::Parameter("services.power.charge_critical_high_current", power_config.charge_critical_high_current));
+    g_node->set_parameter(rclcpp::Parameter("services.power.battery_critical_high_voltage", power_config.battery_critical_high_voltage));
+    g_node->set_parameter(rclcpp::Parameter("services.power.battery_empty_voltage", power_config.battery_empty_voltage));
+    g_node->set_parameter(rclcpp::Parameter("services.power.battery_full_voltage", power_config.battery_full_voltage));
+  }
 }
 
 void handleLowLevelStatus(struct ll_status* status) {
-  static ros::Time last_ll_status_update(ros::Time::now());
+  static rclcpp::Time last_ll_status_update;
 
   std::unique_lock<std::mutex> lk(ll_status_mutex);
   last_ll_status = *status;
 
   // LL status get send at 100ms cycle. If we miss 10 packets, we can assume that it got restarted or flashed with a
   // new FW. In either case we should ensure that it has the right config and update/re-align with us.
-  if (ros::Time::now() - last_ll_status_update > ros::Duration(1.0)) configTracker.setDirty();
-  last_ll_status_update = ros::Time::now();
+  auto now = g_node->get_clock()->now();
+  if ((now - last_ll_status_update).seconds() > 1.0) configTracker.setDirty();
+  last_ll_status_update = now;
 }
 
 void handleLowLevelIMU(struct ll_imu* imu) {
-  mower_msgs::ImuRaw imu_msg;
+  mower_msgs::msg::ImuRaw imu_msg;
   imu_msg.dt = imu->dt_millis;
   imu_msg.ax = imu->acceleration_mss[0];
   imu_msg.ay = imu->acceleration_mss[1];
@@ -629,8 +666,8 @@ void handleLowLevelIMU(struct ll_imu* imu) {
   imu_msg.my = imu->mag_uT[1];
   imu_msg.mz = imu->mag_uT[2];
 
-  sensor_imu_msg.header.stamp = ros::Time::now();
-  sensor_imu_msg.header.seq++;
+  sensor_imu_msg.header.stamp = g_node->get_clock()->now();
+  // ROS2: no header.seq
   sensor_imu_msg.header.frame_id = "base_link";
   sensor_imu_msg.linear_acceleration.x = imu_msg.ax;
   sensor_imu_msg.linear_acceleration.y = imu_msg.ay;
@@ -639,7 +676,7 @@ void handleLowLevelIMU(struct ll_imu* imu) {
   sensor_imu_msg.angular_velocity.y = imu_msg.gy;
   sensor_imu_msg.angular_velocity.z = imu_msg.gz;
 
-  sensor_imu_pub.publish(sensor_imu_msg);
+  sensor_imu_pub->publish(sensor_imu_msg);
 }
 
 void checkAndSendConfig() {
@@ -683,105 +720,180 @@ void checkAndSendConfig() {
   if (dirty) configTracker.setDirty();
 }
 
-void reconfigCB(const mower_logic::MowerLogicConfig& config) {
-  ROS_INFO_STREAM("mower_comms received new mower_logic config");
-
-  mower_logic_config = config;
+// ROS2 parameter change callback (replaces dynamic_reconfigure)
+rcl_interfaces::msg::SetParametersResult onParameterChange(
+    const std::vector<rclcpp::Parameter>& parameters) {
+  for (const auto& param : parameters) {
+    const auto& name = param.get_name();
+    // mower_logic params
+    if (name == "mower_logic.cu_rain_threshold") {
+      mower_logic_config.cu_rain_threshold = param.as_int();
+    } else if (name == "mower_logic.emergency_lift_period") {
+      mower_logic_config.emergency_lift_period = param.as_int();
+    } else if (name == "mower_logic.emergency_tilt_period") {
+      mower_logic_config.emergency_tilt_period = param.as_int();
+    } else if (name == "mower_logic.shutdown_esc_max_pitch") {
+      mower_logic_config.shutdown_esc_max_pitch = param.as_int();
+    } else if (name == "mower_logic.emergency_input_config") {
+      mower_logic_config.emergency_input_config = param.as_string();
+    }
+    // power params
+    else if (name == "services.power.charge_critical_high_voltage") {
+      power_config.charge_critical_high_voltage = param.as_double();
+    } else if (name == "services.power.charge_critical_high_current") {
+      power_config.charge_critical_high_current = param.as_double();
+    } else if (name == "services.power.battery_critical_high_voltage") {
+      power_config.battery_critical_high_voltage = param.as_double();
+    } else if (name == "services.power.battery_empty_voltage") {
+      power_config.battery_empty_voltage = param.as_double();
+    } else if (name == "services.power.battery_full_voltage") {
+      power_config.battery_full_voltage = param.as_double();
+    }
+  }
 
   checkAndSendConfig();
-}
 
-void powerReconfigCB(const ll::PowerConfig& config) {
-  ROS_INFO_STREAM("mower_comms received new mower_logic config");
-
-  power_config = config;
-
-  checkAndSendConfig();
+  rcl_interfaces::msg::SetParametersResult result;
+  result.successful = true;
+  return result;
 }
 
 int main(int argc, char** argv) {
-  ros::init(argc, argv, "mower_comms_v1");
+  rclcpp::init(argc, argv);
 
-  sensor_imu_msg.header.seq = 0;
+  // Create a node with allow_undeclared_parameters for sub-nodes (xesc_driver)
+  auto node_options = rclcpp::NodeOptions().allow_undeclared_parameters(true).automatically_declare_parameters_from_overrides(true);
+  g_node = rclcpp::Node::make_shared("mower_comms_v1", node_options);
 
-  ros::NodeHandle n;
-  ros::NodeHandle paramNh("~");
-  ros::NodeHandle leftParamNh("~/services/diff_drive/left_xesc");
-  ros::NodeHandle mowerParamNh("~/services/diff_drive/mower_xesc");
-  ros::NodeHandle rightParamNh("~/services/diff_drive/right_xesc");
-  ros::NodeHandle mowerLogicParamNh("/mower_logic");
-  ros::NodeHandle powerParamNh("~/services/power");
+  // Initialize timestamps with current clock
+  last_cmd_vel = g_node->get_clock()->now();
+  last_ticks_stamp = g_node->get_clock()->now();
+  configTracker.last_config_req = g_node->get_clock()->now();
 
-  highLevelClient = n.serviceClient<mower_msgs::HighLevelControlSrv>("mower_service/high_level_control");
+  highLevelClient = g_node->create_client<mower_msgs::srv::HighLevelControlSrv>("mower_service/high_level_control");
 
-  mower_logic_config = mower_logic::MowerLogicConfig::__getDefault__();
-  mower_logic_config.__fromServer__(mowerLogicParamNh);
-  reconfigClient = new dynamic_reconfigure::Client<mower_logic::MowerLogicConfig>("/mower_logic", reconfigCB);
+  // Declare and get parameters (replacing dynamic_reconfigure)
+  // mower_logic parameters
+  g_node->declare_parameter<int>("mower_logic.cu_rain_threshold", 0xffff);
+  g_node->declare_parameter<int>("mower_logic.emergency_lift_period", 0xffff);
+  g_node->declare_parameter<int>("mower_logic.emergency_tilt_period", 0xffff);
+  g_node->declare_parameter<int>("mower_logic.shutdown_esc_max_pitch", 0xff);
+  g_node->declare_parameter<std::string>("mower_logic.emergency_input_config", "");
 
-  power_config = ll::PowerConfig::__getDefault__();
-  power_config.__fromServer__(powerParamNh);
-  powerReconfigClient = new dynamic_reconfigure::Client<ll::PowerConfig>("/ll/services/power", powerReconfigCB);
+  mower_logic_config.cu_rain_threshold = g_node->get_parameter("mower_logic.cu_rain_threshold").as_int();
+  mower_logic_config.emergency_lift_period = g_node->get_parameter("mower_logic.emergency_lift_period").as_int();
+  mower_logic_config.emergency_tilt_period = g_node->get_parameter("mower_logic.emergency_tilt_period").as_int();
+  mower_logic_config.shutdown_esc_max_pitch = g_node->get_parameter("mower_logic.shutdown_esc_max_pitch").as_int();
+  mower_logic_config.emergency_input_config = g_node->get_parameter("mower_logic.emergency_input_config").as_string();
 
+  // power parameters
+  g_node->declare_parameter<double>("services.power.charge_critical_high_voltage", 0.0);
+  g_node->declare_parameter<double>("services.power.charge_critical_high_current", 0.0);
+  g_node->declare_parameter<double>("services.power.battery_critical_high_voltage", 0.0);
+  g_node->declare_parameter<double>("services.power.battery_empty_voltage", 0.0);
+  g_node->declare_parameter<double>("services.power.battery_full_voltage", 0.0);
+
+  power_config.charge_critical_high_voltage = g_node->get_parameter("services.power.charge_critical_high_voltage").as_double();
+  power_config.charge_critical_high_current = g_node->get_parameter("services.power.charge_critical_high_current").as_double();
+  power_config.battery_critical_high_voltage = g_node->get_parameter("services.power.battery_critical_high_voltage").as_double();
+  power_config.battery_empty_voltage = g_node->get_parameter("services.power.battery_empty_voltage").as_double();
+  power_config.battery_full_voltage = g_node->get_parameter("services.power.battery_full_voltage").as_double();
+
+  // Register parameter change callback (replaces dynamic_reconfigure callback)
+  auto param_callback_handle = g_node->add_on_set_parameters_callback(onParameterChange);
+
+  // Serial port parameter
   std::string ll_serial_port_name;
-  if (!paramNh.getParam("ll_serial_port", ll_serial_port_name)) {
+  g_node->declare_parameter<std::string>("ll_serial_port", "");
+  ll_serial_port_name = g_node->get_parameter("ll_serial_port").as_string();
+  if (ll_serial_port_name.empty()) {
     ROS_ERROR_STREAM("Error getting low level serial port parameter. Quitting.");
     return 1;
   }
 
-  paramNh.getParam("services/diff_drive/ticks_per_m", wheel_ticks_per_m);
-  paramNh.getParam("services/diff_drive/wheel_distance_m", wheel_distance_m);
+  g_node->declare_parameter<double>("services.diff_drive.ticks_per_m", 0.0);
+  g_node->declare_parameter<double>("services.diff_drive.wheel_distance_m", 0.0);
+  wheel_ticks_per_m = g_node->get_parameter("services.diff_drive.ticks_per_m").as_double();
+  wheel_distance_m = g_node->get_parameter("services.diff_drive.wheel_distance_m").as_double();
 
   ROS_INFO_STREAM("Wheel ticks [1/m]: " << wheel_ticks_per_m);
   ROS_INFO_STREAM("Wheel distance [m]: " << wheel_distance_m);
 
   speed_l = speed_r = speed_mow = target_speed_mow = 0;
 
-  // Some generic settings from param server (non- dynamic)
+  // Some generic settings from param server (non-dynamic)
+  g_node->declare_parameter<bool>("mower_logic.ignore_charging_current", false);
+  g_node->declare_parameter<bool>("services.sound.dfp_is_5v", false);
+  g_node->declare_parameter<int>("services.sound.volume", -1);
+  g_node->declare_parameter<bool>("services.sound.background_sounds", false);
+  g_node->declare_parameter<std::string>("services.sound.language", "en");
+
   llhl_config.options.ignore_charging_current =
-      paramNh.param("/mower_logic/ignore_charging_current", false) ? OptionState::ON : OptionState::OFF;
-  llhl_config.options.dfp_is_5v = paramNh.param("services/sound/dfp_is_5v", false) ? OptionState::ON : OptionState::OFF;
-  llhl_config.volume = paramNh.param("services/sound/volume", -1);
+      g_node->get_parameter("mower_logic.ignore_charging_current").as_bool() ? OptionState::ON : OptionState::OFF;
+  llhl_config.options.dfp_is_5v = g_node->get_parameter("services.sound.dfp_is_5v").as_bool() ? OptionState::ON : OptionState::OFF;
+  llhl_config.volume = g_node->get_parameter("services.sound.volume").as_int();
   llhl_config.options.background_sounds =
-      paramNh.param("services/sound/background_sounds", false) ? OptionState::ON : OptionState::OFF;
+      g_node->get_parameter("services.sound.background_sounds").as_bool() ? OptionState::ON : OptionState::OFF;
   // ISO-639-1 (2 char) language code
-  strncpy(llhl_config.language, paramNh.param<std::string>("services/sound/language", "en").c_str(), 2);
+  strncpy(llhl_config.language, g_node->get_parameter("services.sound.language").as_string().c_str(), 2);
 
   // Setup XESC interfaces
-  if (mowerParamNh.hasParam("xesc_type")) {
-    mow_xesc_interface = new xesc_driver::XescDriver(n, mowerParamNh);
+  // In ROS2, xesc_driver takes a Node::SharedPtr. We create sub-nodes for each ESC
+  // so parameters are namespaced correctly.
+  g_node->declare_parameter<std::string>("services.diff_drive.mower_xesc.xesc_type", "");
+  std::string mower_xesc_type = g_node->get_parameter("services.diff_drive.mower_xesc.xesc_type").as_string();
+  if (!mower_xesc_type.empty()) {
+    auto mower_sub_node = rclcpp::Node::make_shared("mower_xesc", g_node->get_namespace(), node_options);
+    mow_xesc_interface = new xesc_driver::XescDriver(mower_sub_node);
   } else {
     mow_xesc_interface = nullptr;
   }
 
-  left_xesc_interface = new xesc_driver::XescDriver(n, leftParamNh);
-  right_xesc_interface = new xesc_driver::XescDriver(n, rightParamNh);
+  auto left_sub_node = rclcpp::Node::make_shared("left_xesc", g_node->get_namespace(), node_options);
+  left_xesc_interface = new xesc_driver::XescDriver(left_sub_node);
 
-  emergency_pub = n.advertise<mower_msgs::Emergency>("ll/emergency", 1);
+  auto right_sub_node = rclcpp::Node::make_shared("right_xesc", g_node->get_namespace(), node_options);
+  right_xesc_interface = new xesc_driver::XescDriver(right_sub_node);
+
+  emergency_pub = g_node->create_publisher<mower_msgs::msg::Emergency>("ll/emergency", rclcpp::QoS(1));
 
   // Diff drive service
-  actual_twist_pub = n.advertise<geometry_msgs::TwistStamped>("ll/diff_drive/measured_twist", 1);
-  status_left_esc_pub = n.advertise<mower_msgs::ESCStatus>("ll/diff_drive/left_esc_status", 1);
-  status_right_esc_pub = n.advertise<mower_msgs::ESCStatus>("ll/diff_drive/right_esc_status", 1);
+  actual_twist_pub = g_node->create_publisher<geometry_msgs::msg::TwistStamped>("ll/diff_drive/measured_twist", rclcpp::SensorDataQoS());
+  status_left_esc_pub = g_node->create_publisher<mower_msgs::msg::ESCStatus>("ll/diff_drive/left_esc_status", rclcpp::QoS(1));
+  status_right_esc_pub = g_node->create_publisher<mower_msgs::msg::ESCStatus>("ll/diff_drive/right_esc_status", rclcpp::QoS(1));
 
-  status_pub = n.advertise<mower_msgs::Status>("ll/mower_status", 1);
-  sensor_imu_pub = n.advertise<sensor_msgs::Imu>("ll/imu/data_raw", 1);
-  power_pub = n.advertise<mower_msgs::Power>("ll/power", 1);
+  status_pub = g_node->create_publisher<mower_msgs::msg::Status>("ll/mower_status", rclcpp::QoS(1));
+  sensor_imu_pub = g_node->create_publisher<sensor_msgs::msg::Imu>("ll/imu/data_raw", rclcpp::SensorDataQoS());
+  power_pub = g_node->create_publisher<mower_msgs::msg::Power>("ll/power", rclcpp::QoS(1));
 
-  ros::ServiceServer mow_service = n.advertiseService("ll/_service/mow_enabled", setMowEnabled);
-  ros::ServiceServer emergency_service = n.advertiseService("ll/_service/emergency", setEmergencyStop);
-  ros::Subscriber cmd_vel_sub = n.subscribe("ll/cmd_vel", 0, velReceived, ros::TransportHints().tcpNoDelay(true));
-  ros::Subscriber high_level_status_sub = n.subscribe("/mower_logic/current_state", 0, highLevelStatusReceived);
-  ros::Timer publish_timer = n.createTimer(ros::Duration(0.02), publishActuatorsTimerTask);
+  auto mow_service = g_node->create_service<mower_msgs::srv::MowerControlSrv>("ll/_service/mow_enabled", setMowEnabled);
+  auto emergency_service = g_node->create_service<mower_msgs::srv::EmergencyStopSrv>("ll/_service/emergency", setEmergencyStop);
+
+  auto cmd_vel_sub = g_node->create_subscription<geometry_msgs::msg::Twist>(
+      "ll/cmd_vel", rclcpp::QoS(0).best_effort(), velReceived);
+
+  auto high_level_status_sub = g_node->create_subscription<mower_msgs::msg::HighLevelStatus>(
+      "/mower_logic/current_state", rclcpp::QoS(0).best_effort(), highLevelStatusReceived);
+
+  auto publish_timer = g_node->create_wall_timer(20ms, publishActuatorsTimerTask);
 
   size_t buflen = 1000;
   uint8_t buffer[buflen];
   uint8_t buffer_decoded[buflen];
   size_t read = 0;
   // don't change, we need to wait for arduino to boot before actually sending stuff
-  ros::Duration retryDelay(5, 0);
-  ros::AsyncSpinner spinner(1);
-  spinner.start();
-  while (ros::ok()) {
+  rclcpp::Rate retry_rate(0.2);  // 5 second period
+
+  // Use a MultiThreadedExecutor to allow the serial loop to run alongside callbacks
+  rclcpp::executors::MultiThreadedExecutor executor;
+  executor.add_node(g_node);
+
+  // Spin in a background thread
+  std::thread executor_thread([&executor]() {
+    executor.spin();
+  });
+
+  while (rclcpp::ok()) {
     if (!serial_port.isOpen()) {
       ROS_INFO_STREAM("connecting serial interface: " << ll_serial_port_name);
       allow_send = false;
@@ -793,12 +905,12 @@ int main(int argc, char** argv) {
         serial_port.open();
 
         // wait for controller to boot
-        retryDelay.sleep();
+        retry_rate.sleep();
         // this will only be set if no error was set
 
         allow_send = true;
       } catch (std::exception& e) {
-        retryDelay.sleep();
+        retry_rate.sleep();
         ROS_ERROR_STREAM("Error during reconnect.");
       }
     }
@@ -808,7 +920,7 @@ int main(int argc, char** argv) {
     } catch (std::exception& e) {
       ROS_ERROR_STREAM("Error reading serial_port. Closing Connection.");
       serial_port.close();
-      retryDelay.sleep();
+      retry_rate.sleep();
     }
     if (read + bytes_read >= buflen) {
       read = 0;
@@ -873,7 +985,11 @@ int main(int argc, char** argv) {
     }
   }
 
-  spinner.stop();
+  // Stop executor
+  executor.cancel();
+  if (executor_thread.joinable()) {
+    executor_thread.join();
+  }
 
   if (mow_xesc_interface) {
     mow_xesc_interface->setDutyCycle(0.0);
@@ -890,5 +1006,6 @@ int main(int argc, char** argv) {
   delete left_xesc_interface;
   delete right_xesc_interface;
 
+  rclcpp::shutdown();
   return 0;
 }

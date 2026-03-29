@@ -5,16 +5,17 @@
 #ifndef MOWERSERVICEINTERFACE_H
 #define MOWERSERVICEINTERFACE_H
 
-#include <mower_msgs/Status.h>
-#include <ros/publisher.h>
+#include <rclcpp/rclcpp.hpp>
+#include <mower_msgs/msg/status.hpp>
 
 #include <MowerServiceInterfaceBase.hpp>
 
 class MowerServiceInterface : public MowerServiceInterfaceBase {
  public:
   MowerServiceInterface(uint16_t service_id, const xbot::serviceif::Context& ctx,
-                        const ros::Publisher& status_publisher)
-      : MowerServiceInterfaceBase(service_id, ctx), status_publisher_(status_publisher) {
+                        const rclcpp::Node::SharedPtr& node,
+                        const rclcpp::Publisher<mower_msgs::msg::Status>::SharedPtr& status_publisher)
+      : MowerServiceInterfaceBase(service_id, ctx), node_(node), status_publisher_(status_publisher) {
   }
 
   void SetMowerEnabled(bool enabled);
@@ -36,8 +37,9 @@ class MowerServiceInterface : public MowerServiceInterfaceBase {
   void OnTransactionEnd() override;
 
  private:
-  mower_msgs::Status status_msg_{};
-  const ros::Publisher& status_publisher_;
+  rclcpp::Node::SharedPtr node_;
+  mower_msgs::msg::Status status_msg_{};
+  rclcpp::Publisher<mower_msgs::msg::Status>::SharedPtr status_publisher_;
 };
 
 #endif  // MOWERSERVICEINTERFACE_H

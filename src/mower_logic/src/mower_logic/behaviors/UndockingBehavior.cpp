@@ -14,28 +14,28 @@
 //
 #include "UndockingBehavior.h"
 
-#include <mower_msgs/Power.h>
+#include <mower_msgs/msg/power.hpp>
 
-#include "tf2_eigen/tf2_eigen.h"
+#include "tf2_eigen/tf2_eigen.hpp"
 
-extern ros::ServiceClient dockingPointClient;
-extern actionlib::SimpleActionClient<mbf_msgs::ExePathAction>* mbfClientExePath;
-extern xbot_msgs::AbsolutePose getPose();
-extern mower_msgs::Status getStatus();
-extern mower_msgs::Power getPower();
+extern rclcpp::Client<mower_map::srv::GetDockingPointSrv>::SharedPtr dockingPointClient;
+extern rclcpp_action::Client<mbf_msgs::action::ExePath>::SharedPtr mbfClientExePath;
+extern xbot_msgs::msg::AbsolutePose getPose();
+extern mower_msgs::msg::Status getStatus();
+extern mower_msgs::msg::Power getPower();
 
-extern void setRobotPose(geometry_msgs::Pose& pose);
+extern void setRobotPose(geometry_msgs::msg::Pose& pose);
 extern void stopMoving();
 extern bool isGpsGood();
 extern bool setGPS(bool enabled);
 
-extern void registerActions(std::string prefix, const std::vector<xbot_msgs::ActionInfo>& actions);
+extern void registerActions(std::string prefix, const std::vector<xbot_msgs::msg::ActionInfo>& actions);
 
 UndockingBehavior UndockingBehavior::INSTANCE(&MowingBehavior::INSTANCE);
 UndockingBehavior UndockingBehavior::RETRY_INSTANCE(&DockingBehavior::INSTANCE);
 
 UndockingBehavior::UndockingBehavior() {
-  xbot_msgs::ActionInfo abort_undocking_action;
+  xbot_msgs::msg::ActionInfo abort_undocking_action;
   abort_undocking_action.action_id = "abort_undocking";
   abort_undocking_action.enabled = true;
   abort_undocking_action.action_name = "Stop Undocking";
@@ -52,30 +52,30 @@ Behavior* UndockingBehavior::execute() {
   static bool rng_seeding_required = true;
 
   // get robot's current pose from odometry.
-  xbot_msgs::AbsolutePose pose = getPose();
+  xbot_msgs::msg::AbsolutePose pose = getPose();
   tf2::Quaternion quat;
   tf2::fromMsg(pose.pose.pose.orientation, quat);
   tf2::Matrix3x3 m(quat);
   double roll, pitch, yaw;
   m.getRPY(roll, pitch, yaw);
 
-  mbf_msgs::ExePathGoal exePathGoal;
+  mbf_msgs::action::ExePath::Goal exePathGoal;
 
-  nav_msgs::Path path;
+  nav_msgs::msg::Path path;
 
-  ros::Time start_wait_time = ros::Time::now();
-  ros::Rate loop_rate(100);
-  while (ros::ok() && (ros::Time::now() - start_wait_time) < ros::Duration(config.undocking_waiting_time)) {
+  rclcpp::Time start_wait_time = rosNode->get_clock()->now();
+  rclcpp::Rate loop_rate(100);
+  while (rclcpp::ok() && (rosNode->get_clock()->now() - start_wait_time).seconds() < config.undocking_waiting_time) {
     loop_rate.sleep();
   }
 
-  geometry_msgs::PoseStamped docking_pose_stamped_front;
+  geometry_msgs::msg::PoseStamped docking_pose_stamped_front;
   docking_pose_stamped_front.pose = pose.pose.pose;
   docking_pose_stamped_front.header = pose.header;
 
-  const int straight_undock_point_count = 3;  // The FTC planner requires at least 3 points to work
+  const int straight_undock_point_count = 3;
   double incremental_distance = config.undock_distance / straight_undock_point_count;
-  path.poses.push_back(docking_pose_stamped_front);  // Start from current position
+  path.poses.push_back(docking_pose_stamped_front);
   for (int i = 0; i < straight_undock_point_count; i++) {
     docking_pose_stamped_front.pose.position.x -= cos(yaw) * incremental_distance;
     docking_pose_stamped_front.pose.position.y -= sin(yaw) * incremental_distance;
@@ -85,17 +85,16 @@ Behavior* UndockingBehavior::execute() {
   double angle;
   if (config.undock_fixed_angle) {
     angle = config.undock_angle * M_PI / 180.0;
-    ROS_INFO_STREAM("Fixed angle undock: " << config.undock_angle);
+    RCLCPP_INFO(rosNode->get_logger(), "Fixed angle undock: %f", config.undock_angle);
   } else {
-    // seed based on first undock time rather than boot so should be ok even without RTC
     if (rng_seeding_required) {
-      srand(ros::Time::now().toSec());
-      ROS_INFO_STREAM("Random angle undock: Seeded rand()");
+      srand(rosNode->get_clock()->now().seconds());
+      RCLCPP_INFO(rosNode->get_logger(), "Random angle undock: Seeded rand()");
       rng_seeding_required = false;
     }
     double random_number = ((double)rand() / RAND_MAX) * 2.0 - 1.0;
     double random_angle_deg = abs(config.undock_angle) * random_number;
-    ROS_INFO_STREAM("Random angle undock: " << random_angle_deg);
+    RCLCPP_INFO(rosNode->get_logger(), "Random angle undock: %f", random_angle_deg);
     angle = random_angle_deg * M_PI / 180.0;
   }
 
@@ -119,33 +118,32 @@ Behavior* UndockingBehavior::execute() {
   exePathGoal.tolerance_from_action = true;
   exePathGoal.controller = "DockingFTCPlanner";
 
-  auto result = sendGoalAndWaitUnlessAborted(mbfClientExePath, exePathGoal);
+  auto result = sendGoalAndWaitUnlessAborted<mbf_msgs::action::ExePath>(mbfClientExePath, exePathGoal);
 
   if (aborted) {
-    ROS_INFO_STREAM("Undocking aborted.");
+    RCLCPP_INFO(rosNode->get_logger(), "Undocking aborted.");
     stopMoving();
     return &IdleBehavior::INSTANCE;
   }
 
-  bool success = result.state_ == actionlib::SimpleClientGoalState::SUCCEEDED;
+  bool success = result.code == rclcpp_action::ResultCode::SUCCEEDED;
 
   // stop the bot for now
   stopMoving();
 
   if (!success) {
-    ROS_ERROR_STREAM("Error during undock");
+    RCLCPP_ERROR(rosNode->get_logger(), "Error during undock");
     return &IdleBehavior::INSTANCE;
   }
 
-  ROS_INFO_STREAM("Undock success. Waiting for GPS.");
+  RCLCPP_INFO(rosNode->get_logger(), "Undock success. Waiting for GPS.");
   bool hasGps = waitForGPS();
 
   if (!hasGps) {
-    ROS_ERROR_STREAM("Could not get GPS.");
+    RCLCPP_ERROR(rosNode->get_logger(), "Could not get GPS.");
     return &IdleBehavior::INSTANCE;
   }
 
-  // TODO return mow area
   return nextBehavior;
 }
 
@@ -154,15 +152,19 @@ void UndockingBehavior::enter() {
   paused = aborted = false;
 
   // Get the docking pose in map
-  mower_map::GetDockingPointSrv get_docking_point_srv;
-  dockingPointClient.call(get_docking_point_srv);
-  docking_pose_stamped.pose = get_docking_point_srv.response.docking_pose;
+  auto req = std::make_shared<mower_map::srv::GetDockingPointSrv::Request>();
+  auto result = dockingPointClient->async_send_request(req);
+  if (rclcpp::spin_until_future_complete(rosNode, result, std::chrono::seconds(5)) ==
+      rclcpp::FutureReturnCode::SUCCESS) {
+    auto resp = result.get();
+    docking_pose_stamped.pose = resp->docking_pose;
+  }
   docking_pose_stamped.header.frame_id = "map";
-  docking_pose_stamped.header.stamp = ros::Time::now();
+  docking_pose_stamped.header.stamp = rosNode->get_clock()->now();
 
   // set the robot's position to the dock if we're actually docked
   if (getPower().v_charge > 5.0) {
-    ROS_INFO_STREAM("Currently inside the docking station, we set the robot's pose to the docks pose.");
+    RCLCPP_INFO(rosNode->get_logger(), "Currently inside the docking station, we set the robot's pose to the docks pose.");
     setRobotPose(docking_pose_stamped.pose);
   }
 
@@ -188,30 +190,28 @@ bool UndockingBehavior::needs_gps() {
 }
 
 bool UndockingBehavior::mower_enabled() {
-  // No mower during docking
   return false;
 }
 
 bool UndockingBehavior::waitForGPS() {
   gpsRequired = false;
   setGPS(true);
-  ros::Rate odom_rate(1.0);
-  while (ros::ok() && !aborted) {
+  rclcpp::Rate odom_rate(1.0);
+  while (rclcpp::ok() && !aborted) {
     if (isGpsGood()) {
-      ROS_INFO("Got good gps, let's go");
+      RCLCPP_INFO(rosNode->get_logger(), "Got good gps, let's go");
       break;
     } else {
-      ROS_INFO_STREAM("waiting for gps. current accuracy: " << getPose().position_accuracy);
+      RCLCPP_INFO(rosNode->get_logger(), "waiting for gps. current accuracy: %f", getPose().position_accuracy);
       odom_rate.sleep();
     }
   }
-  if (!ros::ok() || aborted) {
+  if (!rclcpp::ok() || aborted) {
     return false;
   }
 
   // wait additional time for odometry filters to converge
-  ros::Rate r(ros::Duration(config.gps_wait_time, 0));
-  r.sleep();
+  std::this_thread::sleep_for(std::chrono::duration<double>(config.gps_wait_time));
 
   gpsRequired = true;
 
@@ -244,12 +244,12 @@ uint8_t UndockingBehavior::get_sub_state() {
 }
 
 uint8_t UndockingBehavior::get_state() {
-  return mower_msgs::HighLevelStatus::HIGH_LEVEL_STATE_AUTONOMOUS;
+  return mower_msgs::msg::HighLevelStatus::HIGH_LEVEL_STATE_AUTONOMOUS;
 }
 
 void UndockingBehavior::handle_action(std::string action) {
   if (action == "mower_logic:undocking/abort_undocking") {
-    ROS_INFO_STREAM("Got abort undocking command");
+    RCLCPP_INFO(rosNode->get_logger(), "Got abort undocking command");
     command_home();
   }
 }

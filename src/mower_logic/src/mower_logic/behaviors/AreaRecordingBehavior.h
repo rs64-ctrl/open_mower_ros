@@ -15,30 +15,29 @@
 #ifndef SRC_AREA_RECORDING_BEHAVIOR_H
 #define SRC_AREA_RECORDING_BEHAVIOR_H
 
-#include <actionlib/client/simple_action_client.h>
-#include <mbf_msgs/ExePathAction.h>
-#include <mbf_msgs/MoveBaseAction.h>
-#include <mower_map/GetDockingPointSrv.h>
+#include <rclcpp_action/rclcpp_action.hpp>
+#include <mbf_msgs/action/exe_path.hpp>
+#include <mbf_msgs/action/move_base.hpp>
+#include <mower_map/srv/get_docking_point_srv.hpp>
 #include <tf2/LinearMath/Transform.h>
 
 #include "Behavior.h"
 #include "DockingBehavior.h"
 #include "IdleBehavior.h"
-#include "geometry_msgs/Twist.h"
-#include "mower_map/AddMowingAreaSrv.h"
-#include "mower_map/MapArea.h"
-#include "mower_map/SetDockingPointSrv.h"
-#include "mower_msgs/EmergencyStopSrv.h"
-#include "mower_msgs/Status.h"
-#include "ros/ros.h"
-#include "sensor_msgs/Joy.h"
-#include "std_msgs/Bool.h"
-#include "tf2_geometry_msgs/tf2_geometry_msgs.h"
-#include "visualization_msgs/Marker.h"
-#include "visualization_msgs/MarkerArray.h"
-#include "xbot_msgs/AbsolutePose.h"
-#include "xbot_msgs/ActionInfo.h"
-#include "xbot_msgs/MapOverlay.h"
+#include "geometry_msgs/msg/twist.hpp"
+#include "mower_map/srv/add_mowing_area_srv.hpp"
+#include "mower_map/msg/map_area.hpp"
+#include "mower_map/srv/set_docking_point_srv.hpp"
+#include "mower_msgs/srv/emergency_stop_srv.hpp"
+#include "mower_msgs/msg/status.hpp"
+#include "sensor_msgs/msg/joy.hpp"
+#include "std_msgs/msg/bool.hpp"
+#include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
+#include "visualization_msgs/msg/marker.hpp"
+#include "visualization_msgs/msg/marker_array.hpp"
+#include "xbot_msgs/msg/absolute_pose.hpp"
+#include "xbot_msgs/msg/action_info.hpp"
+#include "xbot_msgs/msg/map_overlay.hpp"
 
 #define NEW_POINT_MIN_DISTANCE 0.1
 
@@ -51,56 +50,54 @@ class AreaRecordingBehavior : public Behavior {
  private:
   bool has_odom = false;
 
-  std::vector<xbot_msgs::ActionInfo> actions;
+  std::vector<xbot_msgs::msg::ActionInfo> actions;
 
-  sensor_msgs::Joy last_joy;
-  xbot_msgs::AbsolutePose last_pose;
+  sensor_msgs::msg::Joy last_joy;
+  xbot_msgs::msg::AbsolutePose last_pose;
 
-  ros::Publisher map_overlay_pub;
-  ros::Publisher marker_pub;
-  ros::Publisher marker_array_pub;
+  rclcpp::Publisher<xbot_msgs::msg::MapOverlay>::SharedPtr map_overlay_pub;
+  rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr marker_pub;
+  rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr marker_array_pub;
 
-  ros::Subscriber joy_sub, pose_sub;
+  rclcpp::Subscription<sensor_msgs::msg::Joy>::SharedPtr joy_sub;
+  rclcpp::Subscription<xbot_msgs::msg::AbsolutePose>::SharedPtr pose_sub;
 
-  ros::Subscriber dock_sub, polygon_sub, mow_area_sub, nav_area_sub, auto_point_collecting_sub, collect_point_sub;
+  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr dock_sub, polygon_sub, mow_area_sub, nav_area_sub,
+      auto_point_collecting_sub, collect_point_sub;
 
-  ros::ServiceClient add_mowing_area_client, set_docking_point_client;
+  rclcpp::Client<mower_map::srv::AddMowingAreaSrv>::SharedPtr add_mowing_area_client;
+  rclcpp::Client<mower_map::srv::SetDockingPointSrv>::SharedPtr set_docking_point_client;
 
   bool has_first_docking_pos = false;
-  geometry_msgs::Pose first_docking_pos;
+  geometry_msgs::msg::Pose first_docking_pos;
 
-  // true, if we should be recording the current data into a polygon
   bool poly_recording_enabled = false;
 
-  // true, if all polys were recorded and the complete area is finished
   bool is_mowing_area = false;
   bool is_navigation_area = false;
   bool finished_all = false;
   bool set_docking_position = false;
   bool has_outline = false;
 
-  // auto point collecting enabled to true points are collected automatically
-  // if distance is greater than NEW_POINT_MIN_DISTANCE during recording
-  // otherwise collect_point has to be set to true manually for each point to be recorded
   bool auto_point_collecting = true;
   bool collect_point = false;
 
   bool manual_mowing = false;
 
-  visualization_msgs::MarkerArray markers;
-  visualization_msgs::Marker marker;
+  visualization_msgs::msg::MarkerArray markers;
+  visualization_msgs::msg::Marker marker;
 
  private:
-  bool recordNewPolygon(geometry_msgs::Polygon& polygon, xbot_msgs::MapOverlay& resultOverlay);
-  bool getDockingPosition(geometry_msgs::Pose& pos);
-  void pose_received(const xbot_msgs::AbsolutePose::ConstPtr& msg);
-  void joy_received(const sensor_msgs::Joy& joy_msg);
-  void record_dock_received(std_msgs::Bool state_msg);
-  void record_polygon_received(std_msgs::Bool state_msg);
-  void record_mowing_received(std_msgs::Bool state_msg);
-  void record_navigation_received(std_msgs::Bool state_msg);
-  void record_auto_point_collecting(std_msgs::Bool state_msg);
-  void record_collect_point(std_msgs::Bool state_msg);
+  bool recordNewPolygon(geometry_msgs::msg::Polygon& polygon, xbot_msgs::msg::MapOverlay& resultOverlay);
+  bool getDockingPosition(geometry_msgs::msg::Pose& pos);
+  void pose_received(const xbot_msgs::msg::AbsolutePose::SharedPtr msg);
+  void joy_received(const sensor_msgs::msg::Joy::SharedPtr joy_msg);
+  void record_dock_received(const std_msgs::msg::Bool::SharedPtr state_msg);
+  void record_polygon_received(const std_msgs::msg::Bool::SharedPtr state_msg);
+  void record_mowing_received(const std_msgs::msg::Bool::SharedPtr state_msg);
+  void record_navigation_received(const std_msgs::msg::Bool::SharedPtr state_msg);
+  void record_auto_point_collecting(const std_msgs::msg::Bool::SharedPtr state_msg);
+  void record_collect_point(const std_msgs::msg::Bool::SharedPtr state_msg);
 
   void update_actions();
 
