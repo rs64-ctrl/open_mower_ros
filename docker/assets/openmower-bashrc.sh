@@ -6,12 +6,15 @@ if [ -n "${PS1:-}" ] && [ "${STACK_SHELL:-}" = "1" ]; then
     export PS1="\[\e[1;34m\][${stack}]\[\e[0m\] $PS1"
 fi
 
-# Source ROS and the workspace overlay (if present)
+# Source ROS2 and the workspace overlay (if present)
 if [ -f "/opt/ros/$ROS_DISTRO/setup.bash" ]; then
     . "/opt/ros/$ROS_DISTRO/setup.bash"
 fi
-if [ -f "/opt/open_mower_ros/devel/setup.bash" ]; then
-    . "/opt/open_mower_ros/devel/setup.bash"
+if [ -f "/opt/prebuilt/slic3r_coverage_planner/setup.bash" ]; then
+    . "/opt/prebuilt/slic3r_coverage_planner/setup.bash"
+fi
+if [ -f "/opt/open_mower_ros/install/setup.bash" ]; then
+    . "/opt/open_mower_ros/install/setup.bash"
 fi
 
 # Also expose version info if present

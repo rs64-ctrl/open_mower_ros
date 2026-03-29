@@ -1,29 +1,39 @@
 #!/bin/bash
 set -e
 
-# setup ros environment
+# Source ROS2 environment
 source "/opt/ros/$ROS_DISTRO/setup.bash"
-source /opt/open_mower_ros/devel/setup.bash
 
-# setup om environment
-source /opt/open_mower_ros/version_info.env
+# Source prebuilt slic3r underlay (if present)
+if [ -f /opt/prebuilt/slic3r_coverage_planner/setup.bash ]; then
+    source /opt/prebuilt/slic3r_coverage_planner/setup.bash
+fi
 
-# OSv2 debugging get controlled via env var DEBUG and has the ROSCONSOLE_CONFIG_FILE embedded
+# Source workspace overlay
+source /opt/open_mower_ros/install/setup.bash
+
+# Source version info
+if [ -f /opt/open_mower_ros/version_info.env ]; then
+    source /opt/open_mower_ros/version_info.env
+fi
+
+# ROS2 logging configuration controlled via DEBUG env var
 shopt -s nocasematch
 case "${DEBUG:-0}" in
     1|true|yes|on|y)
-        export ROSOUT_DISABLE_FILE_LOGGING=False
-        unset ROSCONSOLE_CONFIG_FILE
+        # Debug mode: verbose logging
+        export RCUTILS_LOGGING_BUFFERED_STREAM=0
+        export ROS_LOG_DIR=/root/.ros/log
     ;;
     *)
-        export ROSCONSOLE_CONFIG_FILE=/config/rosconsole.config
-        export ROSOUT_DISABLE_FILE_LOGGING=True
+        # Production mode: warn and above only
+        export RCUTILS_LOGGING_BUFFERED_STREAM=1
+        export RCUTILS_COLORIZED_OUTPUT=0
     ;;
 esac
 shopt -u nocasematch || true
 
-# Ensure stdout and stderr are unbuffered to get logging in real time order
-export ROSCONSOLE_STDOUT_LINE_BUFFERED=1
+# Ensure stdout/stderr are unbuffered for real-time logging
 export PYTHONUNBUFFERED=1
 
 exec -- "$@"
