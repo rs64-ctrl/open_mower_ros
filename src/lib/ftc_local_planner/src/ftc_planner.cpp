@@ -16,98 +16,103 @@ namespace ftc_local_planner
     {
     }
 
+    std::string FTCPlanner::p(const std::string& param) const
+    {
+        return plugin_name_ + "." + param;
+    }
+
     void FTCPlanner::declareParameters()
     {
         auto & n = *node_;
 
         // ControlPoint group
-        n.declare_parameter("speed_fast", config.speed_fast);
-        n.declare_parameter("speed_fast_threshold", config.speed_fast_threshold);
-        n.declare_parameter("speed_fast_threshold_angle", config.speed_fast_threshold_angle);
-        n.declare_parameter("speed_slow", config.speed_slow);
-        n.declare_parameter("speed_angular", config.speed_angular);
-        n.declare_parameter("acceleration", config.acceleration);
+        n.declare_parameter(p("speed_fast"), config.speed_fast);
+        n.declare_parameter(p("speed_fast_threshold"), config.speed_fast_threshold);
+        n.declare_parameter(p("speed_fast_threshold_angle"), config.speed_fast_threshold_angle);
+        n.declare_parameter(p("speed_slow"), config.speed_slow);
+        n.declare_parameter(p("speed_angular"), config.speed_angular);
+        n.declare_parameter(p("acceleration"), config.acceleration);
 
         // PID group
-        n.declare_parameter("kp_lon", config.kp_lon);
-        n.declare_parameter("ki_lon", config.ki_lon);
-        n.declare_parameter("ki_lon_max", config.ki_lon_max);
-        n.declare_parameter("kd_lon", config.kd_lon);
-        n.declare_parameter("ki_lat", config.ki_lat);
-        n.declare_parameter("ki_lat_max", config.ki_lat_max);
-        n.declare_parameter("kp_lat", config.kp_lat);
-        n.declare_parameter("kd_lat", config.kd_lat);
-        n.declare_parameter("kp_ang", config.kp_ang);
-        n.declare_parameter("ki_ang", config.ki_ang);
-        n.declare_parameter("ki_ang_max", config.ki_ang_max);
-        n.declare_parameter("kd_ang", config.kd_ang);
+        n.declare_parameter(p("kp_lon"), config.kp_lon);
+        n.declare_parameter(p("ki_lon"), config.ki_lon);
+        n.declare_parameter(p("ki_lon_max"), config.ki_lon_max);
+        n.declare_parameter(p("kd_lon"), config.kd_lon);
+        n.declare_parameter(p("ki_lat"), config.ki_lat);
+        n.declare_parameter(p("ki_lat_max"), config.ki_lat_max);
+        n.declare_parameter(p("kp_lat"), config.kp_lat);
+        n.declare_parameter(p("kd_lat"), config.kd_lat);
+        n.declare_parameter(p("kp_ang"), config.kp_ang);
+        n.declare_parameter(p("ki_ang"), config.ki_ang);
+        n.declare_parameter(p("ki_ang_max"), config.ki_ang_max);
+        n.declare_parameter(p("kd_ang"), config.kd_ang);
 
         // Robot group
-        n.declare_parameter("max_cmd_vel_speed", config.max_cmd_vel_speed);
-        n.declare_parameter("max_cmd_vel_ang", config.max_cmd_vel_ang);
-        n.declare_parameter("max_goal_distance_error", config.max_goal_distance_error);
-        n.declare_parameter("max_goal_angle_error", config.max_goal_angle_error);
-        n.declare_parameter("goal_timeout", config.goal_timeout);
-        n.declare_parameter("max_follow_distance", config.max_follow_distance);
+        n.declare_parameter(p("max_cmd_vel_speed"), config.max_cmd_vel_speed);
+        n.declare_parameter(p("max_cmd_vel_ang"), config.max_cmd_vel_ang);
+        n.declare_parameter(p("max_goal_distance_error"), config.max_goal_distance_error);
+        n.declare_parameter(p("max_goal_angle_error"), config.max_goal_angle_error);
+        n.declare_parameter(p("goal_timeout"), config.goal_timeout);
+        n.declare_parameter(p("max_follow_distance"), config.max_follow_distance);
 
         // Top-level
-        n.declare_parameter("forward_only", config.forward_only);
-        n.declare_parameter("restore_defaults", config.restore_defaults);
-        n.declare_parameter("debug_pid", config.debug_pid);
+        n.declare_parameter(p("forward_only"), config.forward_only);
+        n.declare_parameter(p("restore_defaults"), config.restore_defaults);
+        n.declare_parameter(p("debug_pid"), config.debug_pid);
 
         // Recovery group
-        n.declare_parameter("oscillation_recovery", config.oscillation_recovery);
-        n.declare_parameter("oscillation_v_eps", config.oscillation_v_eps);
-        n.declare_parameter("oscillation_omega_eps", config.oscillation_omega_eps);
-        n.declare_parameter("oscillation_recovery_min_duration", config.oscillation_recovery_min_duration);
+        n.declare_parameter(p("oscillation_recovery"), config.oscillation_recovery);
+        n.declare_parameter(p("oscillation_v_eps"), config.oscillation_v_eps);
+        n.declare_parameter(p("oscillation_omega_eps"), config.oscillation_omega_eps);
+        n.declare_parameter(p("oscillation_recovery_min_duration"), config.oscillation_recovery_min_duration);
 
         // Obstacles group
-        n.declare_parameter("check_obstacles", config.check_obstacles);
-        n.declare_parameter("obstacle_lookahead", config.obstacle_lookahead);
-        n.declare_parameter("obstacle_footprint", config.obstacle_footprint);
-        n.declare_parameter("debug_obstacle", config.debug_obstacle);
+        n.declare_parameter(p("check_obstacles"), config.check_obstacles);
+        n.declare_parameter(p("obstacle_lookahead"), config.obstacle_lookahead);
+        n.declare_parameter(p("obstacle_footprint"), config.obstacle_footprint);
+        n.declare_parameter(p("debug_obstacle"), config.debug_obstacle);
 
         // Read initial values
-        config.speed_fast = n.get_parameter("speed_fast").as_double();
-        config.speed_fast_threshold = n.get_parameter("speed_fast_threshold").as_double();
-        config.speed_fast_threshold_angle = n.get_parameter("speed_fast_threshold_angle").as_double();
-        config.speed_slow = n.get_parameter("speed_slow").as_double();
-        config.speed_angular = n.get_parameter("speed_angular").as_double();
-        config.acceleration = n.get_parameter("acceleration").as_double();
+        config.speed_fast = n.get_parameter(p("speed_fast")).as_double();
+        config.speed_fast_threshold = n.get_parameter(p("speed_fast_threshold")).as_double();
+        config.speed_fast_threshold_angle = n.get_parameter(p("speed_fast_threshold_angle")).as_double();
+        config.speed_slow = n.get_parameter(p("speed_slow")).as_double();
+        config.speed_angular = n.get_parameter(p("speed_angular")).as_double();
+        config.acceleration = n.get_parameter(p("acceleration")).as_double();
 
-        config.kp_lon = n.get_parameter("kp_lon").as_double();
-        config.ki_lon = n.get_parameter("ki_lon").as_double();
-        config.ki_lon_max = n.get_parameter("ki_lon_max").as_double();
-        config.kd_lon = n.get_parameter("kd_lon").as_double();
-        config.ki_lat = n.get_parameter("ki_lat").as_double();
-        config.ki_lat_max = n.get_parameter("ki_lat_max").as_double();
-        config.kp_lat = n.get_parameter("kp_lat").as_double();
-        config.kd_lat = n.get_parameter("kd_lat").as_double();
-        config.kp_ang = n.get_parameter("kp_ang").as_double();
-        config.ki_ang = n.get_parameter("ki_ang").as_double();
-        config.ki_ang_max = n.get_parameter("ki_ang_max").as_double();
-        config.kd_ang = n.get_parameter("kd_ang").as_double();
+        config.kp_lon = n.get_parameter(p("kp_lon")).as_double();
+        config.ki_lon = n.get_parameter(p("ki_lon")).as_double();
+        config.ki_lon_max = n.get_parameter(p("ki_lon_max")).as_double();
+        config.kd_lon = n.get_parameter(p("kd_lon")).as_double();
+        config.ki_lat = n.get_parameter(p("ki_lat")).as_double();
+        config.ki_lat_max = n.get_parameter(p("ki_lat_max")).as_double();
+        config.kp_lat = n.get_parameter(p("kp_lat")).as_double();
+        config.kd_lat = n.get_parameter(p("kd_lat")).as_double();
+        config.kp_ang = n.get_parameter(p("kp_ang")).as_double();
+        config.ki_ang = n.get_parameter(p("ki_ang")).as_double();
+        config.ki_ang_max = n.get_parameter(p("ki_ang_max")).as_double();
+        config.kd_ang = n.get_parameter(p("kd_ang")).as_double();
 
-        config.max_cmd_vel_speed = n.get_parameter("max_cmd_vel_speed").as_double();
-        config.max_cmd_vel_ang = n.get_parameter("max_cmd_vel_ang").as_double();
-        config.max_goal_distance_error = n.get_parameter("max_goal_distance_error").as_double();
-        config.max_goal_angle_error = n.get_parameter("max_goal_angle_error").as_double();
-        config.goal_timeout = n.get_parameter("goal_timeout").as_double();
-        config.max_follow_distance = n.get_parameter("max_follow_distance").as_double();
+        config.max_cmd_vel_speed = n.get_parameter(p("max_cmd_vel_speed")).as_double();
+        config.max_cmd_vel_ang = n.get_parameter(p("max_cmd_vel_ang")).as_double();
+        config.max_goal_distance_error = n.get_parameter(p("max_goal_distance_error")).as_double();
+        config.max_goal_angle_error = n.get_parameter(p("max_goal_angle_error")).as_double();
+        config.goal_timeout = n.get_parameter(p("goal_timeout")).as_double();
+        config.max_follow_distance = n.get_parameter(p("max_follow_distance")).as_double();
 
-        config.forward_only = n.get_parameter("forward_only").as_bool();
-        config.restore_defaults = n.get_parameter("restore_defaults").as_bool();
-        config.debug_pid = n.get_parameter("debug_pid").as_bool();
+        config.forward_only = n.get_parameter(p("forward_only")).as_bool();
+        config.restore_defaults = n.get_parameter(p("restore_defaults")).as_bool();
+        config.debug_pid = n.get_parameter(p("debug_pid")).as_bool();
 
-        config.oscillation_recovery = n.get_parameter("oscillation_recovery").as_bool();
-        config.oscillation_v_eps = n.get_parameter("oscillation_v_eps").as_double();
-        config.oscillation_omega_eps = n.get_parameter("oscillation_omega_eps").as_double();
-        config.oscillation_recovery_min_duration = n.get_parameter("oscillation_recovery_min_duration").as_double();
+        config.oscillation_recovery = n.get_parameter(p("oscillation_recovery")).as_bool();
+        config.oscillation_v_eps = n.get_parameter(p("oscillation_v_eps")).as_double();
+        config.oscillation_omega_eps = n.get_parameter(p("oscillation_omega_eps")).as_double();
+        config.oscillation_recovery_min_duration = n.get_parameter(p("oscillation_recovery_min_duration")).as_double();
 
-        config.check_obstacles = n.get_parameter("check_obstacles").as_bool();
-        config.obstacle_lookahead = n.get_parameter("obstacle_lookahead").as_int();
-        config.obstacle_footprint = n.get_parameter("obstacle_footprint").as_bool();
-        config.debug_obstacle = n.get_parameter("debug_obstacle").as_bool();
+        config.check_obstacles = n.get_parameter(p("check_obstacles")).as_bool();
+        config.obstacle_lookahead = n.get_parameter(p("obstacle_lookahead")).as_int();
+        config.obstacle_footprint = n.get_parameter(p("obstacle_footprint")).as_bool();
+        config.debug_obstacle = n.get_parameter(p("debug_obstacle")).as_bool();
 
         // Store defaults for restore_defaults functionality
         default_config = config;
@@ -124,38 +129,38 @@ namespace ftc_local_planner
             const auto &name = param.get_name();
 
             // ControlPoint
-            if (name == "speed_fast") config.speed_fast = param.as_double();
-            else if (name == "speed_fast_threshold") config.speed_fast_threshold = param.as_double();
-            else if (name == "speed_fast_threshold_angle") config.speed_fast_threshold_angle = param.as_double();
-            else if (name == "speed_slow") config.speed_slow = param.as_double();
-            else if (name == "speed_angular") config.speed_angular = param.as_double();
-            else if (name == "acceleration") config.acceleration = param.as_double();
+            if (name == p("speed_fast")) config.speed_fast = param.as_double();
+            else if (name == p("speed_fast_threshold")) config.speed_fast_threshold = param.as_double();
+            else if (name == p("speed_fast_threshold_angle")) config.speed_fast_threshold_angle = param.as_double();
+            else if (name == p("speed_slow")) config.speed_slow = param.as_double();
+            else if (name == p("speed_angular")) config.speed_angular = param.as_double();
+            else if (name == p("acceleration")) config.acceleration = param.as_double();
 
             // PID
-            else if (name == "kp_lon") config.kp_lon = param.as_double();
-            else if (name == "ki_lon") config.ki_lon = param.as_double();
-            else if (name == "ki_lon_max") config.ki_lon_max = param.as_double();
-            else if (name == "kd_lon") config.kd_lon = param.as_double();
-            else if (name == "ki_lat") config.ki_lat = param.as_double();
-            else if (name == "ki_lat_max") config.ki_lat_max = param.as_double();
-            else if (name == "kp_lat") config.kp_lat = param.as_double();
-            else if (name == "kd_lat") config.kd_lat = param.as_double();
-            else if (name == "kp_ang") config.kp_ang = param.as_double();
-            else if (name == "ki_ang") config.ki_ang = param.as_double();
-            else if (name == "ki_ang_max") config.ki_ang_max = param.as_double();
-            else if (name == "kd_ang") config.kd_ang = param.as_double();
+            else if (name == p("kp_lon")) config.kp_lon = param.as_double();
+            else if (name == p("ki_lon")) config.ki_lon = param.as_double();
+            else if (name == p("ki_lon_max")) config.ki_lon_max = param.as_double();
+            else if (name == p("kd_lon")) config.kd_lon = param.as_double();
+            else if (name == p("ki_lat")) config.ki_lat = param.as_double();
+            else if (name == p("ki_lat_max")) config.ki_lat_max = param.as_double();
+            else if (name == p("kp_lat")) config.kp_lat = param.as_double();
+            else if (name == p("kd_lat")) config.kd_lat = param.as_double();
+            else if (name == p("kp_ang")) config.kp_ang = param.as_double();
+            else if (name == p("ki_ang")) config.ki_ang = param.as_double();
+            else if (name == p("ki_ang_max")) config.ki_ang_max = param.as_double();
+            else if (name == p("kd_ang")) config.kd_ang = param.as_double();
 
             // Robot
-            else if (name == "max_cmd_vel_speed") config.max_cmd_vel_speed = param.as_double();
-            else if (name == "max_cmd_vel_ang") config.max_cmd_vel_ang = param.as_double();
-            else if (name == "max_goal_distance_error") config.max_goal_distance_error = param.as_double();
-            else if (name == "max_goal_angle_error") config.max_goal_angle_error = param.as_double();
-            else if (name == "goal_timeout") config.goal_timeout = param.as_double();
-            else if (name == "max_follow_distance") config.max_follow_distance = param.as_double();
+            else if (name == p("max_cmd_vel_speed")) config.max_cmd_vel_speed = param.as_double();
+            else if (name == p("max_cmd_vel_ang")) config.max_cmd_vel_ang = param.as_double();
+            else if (name == p("max_goal_distance_error")) config.max_goal_distance_error = param.as_double();
+            else if (name == p("max_goal_angle_error")) config.max_goal_angle_error = param.as_double();
+            else if (name == p("goal_timeout")) config.goal_timeout = param.as_double();
+            else if (name == p("max_follow_distance")) config.max_follow_distance = param.as_double();
 
             // Top-level
-            else if (name == "forward_only") config.forward_only = param.as_bool();
-            else if (name == "restore_defaults")
+            else if (name == p("forward_only")) config.forward_only = param.as_bool();
+            else if (name == p("restore_defaults"))
             {
                 if (param.as_bool())
                 {
@@ -163,19 +168,19 @@ namespace ftc_local_planner
                     config.restore_defaults = false;
                 }
             }
-            else if (name == "debug_pid") config.debug_pid = param.as_bool();
+            else if (name == p("debug_pid")) config.debug_pid = param.as_bool();
 
             // Recovery
-            else if (name == "oscillation_recovery") config.oscillation_recovery = param.as_bool();
-            else if (name == "oscillation_v_eps") config.oscillation_v_eps = param.as_double();
-            else if (name == "oscillation_omega_eps") config.oscillation_omega_eps = param.as_double();
-            else if (name == "oscillation_recovery_min_duration") config.oscillation_recovery_min_duration = param.as_double();
+            else if (name == p("oscillation_recovery")) config.oscillation_recovery = param.as_bool();
+            else if (name == p("oscillation_v_eps")) config.oscillation_v_eps = param.as_double();
+            else if (name == p("oscillation_omega_eps")) config.oscillation_omega_eps = param.as_double();
+            else if (name == p("oscillation_recovery_min_duration")) config.oscillation_recovery_min_duration = param.as_double();
 
             // Obstacles
-            else if (name == "check_obstacles") config.check_obstacles = param.as_bool();
-            else if (name == "obstacle_lookahead") config.obstacle_lookahead = static_cast<int>(param.as_int());
-            else if (name == "obstacle_footprint") config.obstacle_footprint = param.as_bool();
-            else if (name == "debug_obstacle") config.debug_obstacle = param.as_bool();
+            else if (name == p("check_obstacles")) config.check_obstacles = param.as_bool();
+            else if (name == p("obstacle_lookahead")) config.obstacle_lookahead = static_cast<int>(param.as_int());
+            else if (name == p("obstacle_footprint")) config.obstacle_footprint = param.as_bool();
+            else if (name == p("debug_obstacle")) config.debug_obstacle = param.as_bool();
         }
 
         // Update speed and recovery detector
@@ -204,6 +209,9 @@ namespace ftc_local_planner
         costmap = costmap_ros;
         costmap_map_ = costmap->getCostmap();
         tf_buffer = tf;
+
+        // Store plugin name for parameter namespacing
+        plugin_name_ = name;
 
         // Declare and load parameters (replaces dynamic_reconfigure)
         declareParameters();

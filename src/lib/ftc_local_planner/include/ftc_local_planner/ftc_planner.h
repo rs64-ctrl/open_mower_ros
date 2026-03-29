@@ -114,6 +114,8 @@ namespace ftc_local_planner
             return (node_->now() - state_entered_time).seconds();
         }
 
+        std::string plugin_name_;
+        std::string p(const std::string& param) const;
         void declareParameters();
         rcl_interfaces::msg::SetParametersResult parametersCallback(
             const std::vector<rclcpp::Parameter> &parameters);
