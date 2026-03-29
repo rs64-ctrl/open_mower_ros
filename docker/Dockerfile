@@ -83,8 +83,9 @@ RUN chmod +x /openmower_entrypoint.sh
 ARG USERNAME=openmower
 ARG USER_UID=1000
 ARG USER_GID=1000
-RUN groupadd --gid ${USER_GID} ${USERNAME} 2>/dev/null || true \
-    && useradd --uid ${USER_UID} --gid ${USER_GID} --create-home --shell /bin/bash ${USERNAME} \
+RUN (id -u ${USER_UID} &>/dev/null && usermod -l ${USERNAME} -d /home/${USERNAME} -m $(id -nu ${USER_UID}) || \
+    (groupadd --gid ${USER_GID} ${USERNAME} 2>/dev/null || true && \
+     useradd --uid ${USER_UID} --gid ${USER_GID} --create-home --shell /bin/bash ${USERNAME})) \
     && adduser ${USERNAME} dialout \
     && chown -R ${USER_UID}:${USER_GID} /config /home/${USERNAME}
 
